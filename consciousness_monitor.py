@@ -11,7 +11,7 @@ import argparse
 from datetime import datetime
 
 class ConsciousnessMonitor:
-    def __init__(self, csv_file="OSC-Python-Recording.csv", window_seconds=2, 
+    def __init__(self, csv_file="OSC-Python-Recording.csv", window_seconds=0.75, 
                  update_interval=1.0, channels=['TP9', 'AF7', 'AF8', 'TP10'],
                  show_bands=True, show_insights=True):
         
@@ -24,33 +24,61 @@ class ConsciousnessMonitor:
         self.sample_rate = 256
         self.window_samples = int(window_seconds * self.sample_rate)  # Ensure integer
         
-        # EEG frequency bands
+        # EEG frequency bands (clinical standards)
         self.bands = {
-            'delta': (0.5, 4),
-            'theta': (4, 8), 
-            'alpha': (8, 13),
-            'beta': (13, 30),
-            'gamma': (30, 50)
+            'delta': (0.5, 4),    # Not 0-4, starts at 0.5
+            'theta': (4, 8),      
+            'alpha': (8, 13),     # Wider alpha band
+            'beta': (13, 30),     
+            'gamma': (30, 50)     # Clinical gamma, not 30-100
         }
         
+        # Design filters once during initialization
+        self.highpass_filter = signal.butter(4, 0.5, btype='high', fs=self.sample_rate)
+        self.lowpass_filter = signal.butter(4, 50, btype='low', fs=self.sample_rate)
+        self.notch_filter = signal.iirnotch(60, 30, fs=self.sample_rate)  # 60Hz notch
+        
         self.last_file_size = 0
-        print(f"🧠 Consciousness Monitor v2 Ready!")
+        print(f"🧠 Consciousness Monitor v2 Ready! (With Real Signal Processing)")
         print(f"Window: {window_seconds}s | Update: {update_interval}s | Channels: {len(channels)}")
         print("=" * 60)
     
+    def preprocess_signal(self, raw_data):
+        """Mind Monitor style: minimal preprocessing to preserve alpha"""
+        if len(raw_data) < 50:
+            return raw_data
+            
+        # Based on analysis: Mind Monitor uses raw signal or minimal DC removal
+        # No aggressive filtering that kills alpha waves!
+        
+        # Option 1: Raw signal (works great for 0.5-1s windows)
+        # return raw_data
+        
+        # Option 2: DC removal only (also works great)
+        filtered = raw_data - np.mean(raw_data)
+        
+        # NO detrending, NO high-pass, NO low-pass filtering
+        # These kill alpha waves and inflate delta artificially
+        
+        return filtered
+    
     def get_band_power(self, data, low_freq, high_freq):
-        """Calculate power in specific frequency band using FFT"""
+        """Calculate power in specific frequency band using proper signal processing"""
         if len(data) < 100:
             return 0
             
-        # Remove DC offset and trends
-        data = data - np.mean(data)
+        # Preprocess the signal first!
+        clean_data = self.preprocess_signal(data)
         
-        # Apply window to reduce spectral leakage
-        windowed = data * np.hanning(len(data))
+        # Apply Hanning window to reduce spectral leakage
+        windowed = clean_data * np.hanning(len(clean_data))
         
-        # Calculate power spectral density using FFT
-        freqs, psd = signal.welch(windowed, fs=self.sample_rate, nperseg=min(256, len(data)))
+        # Use Welch's method for better spectral estimation
+        nperseg = min(256, len(windowed))
+        noverlap = nperseg // 2  # Overlap must be less than nperseg
+        freqs, psd = signal.welch(windowed, fs=self.sample_rate, 
+                                  nperseg=nperseg, 
+                                  noverlap=noverlap)
         
         # Find frequency indices for the band
         freq_mask = (freqs >= low_freq) & (freqs <= high_freq)
@@ -65,14 +93,35 @@ class ConsciousnessMonitor:
         if len(eeg_data) < 50:
             return None
             
+        # Clean data - remove NaN values from EEG channels only
+        if 'TimeStamp' in eeg_data.columns:
+            # Full CSV with timestamp - skip timestamp column
+            eeg_columns = ['RAW_TP9', 'RAW_AF7', 'RAW_AF8', 'RAW_TP10']
+            clean_eeg = eeg_data[eeg_columns].dropna()
+            if len(clean_eeg) < 50:
+                return None
+            eeg_data = clean_eeg
+            timestamp_offset = 0  # No timestamp column after cleaning
+        else:
+            # Already cleaned data or data without timestamp
+            timestamp_offset = 1 if len(eeg_data.columns) > 4 else 0
+            
         # Calculate band powers for each channel
         results = {}
         
         for i, channel in enumerate(self.channels):
-            if i+1 >= len(eeg_data.columns):  # Skip if channel doesn't exist
+            if i+timestamp_offset >= len(eeg_data.columns):  # Skip if channel doesn't exist
                 continue
                 
-            channel_data = eeg_data.iloc[:, i+1].values  # Skip timestamp
+            channel_data = eeg_data.iloc[:, i+timestamp_offset].values
+            
+            # Skip channels with NaN values or too much noise
+            if np.isnan(channel_data).any():
+                continue
+            if len(channel_data) < 50:
+                continue
+            if np.std(channel_data) > 1000 or np.std(channel_data) < 1:
+                continue
             
             band_powers = {}
             for band_name, (low, high) in self.bands.items():
@@ -94,37 +143,54 @@ class ConsciousnessMonitor:
     
     def interpret_mental_state(self, powers):
         """Convert band powers to psychological insights"""
-        total_power = sum(powers.values())
-        if total_power == 0:
-            return {"state": "No signal", "confidence": "LOW", "insights": [], "ratios": powers}
-            
-        ratios = {band: power/total_power for band, power in powers.items()}
+        # Handle invalid values
+        valid_powers = {band: power for band, power in powers.items() 
+                       if power > 0 and not np.isnan(power) and not np.isinf(power)}
         
-        # Psychological interpretation
+        if not valid_powers:
+            return {"state": "No signal", "confidence": "LOW", "insights": [], "ratios": {band: 0 for band in self.bands.keys()}}
+        
+        # Powers are already linear values from get_band_power(), just normalize
+        total_power = sum(valid_powers.values())
+        
+        if total_power == 0:
+            return {"state": "No signal", "confidence": "LOW", "insights": [], "ratios": {band: 0 for band in self.bands.keys()}}
+            
+        ratios = {band: power/total_power for band, power in valid_powers.items()}
+        
+        # Fill in missing bands with 0
+        for band in self.bands.keys():
+            if band not in ratios:
+                ratios[band] = 0
+        
+        # Psychological interpretation with refined thresholds
         state_indicators = []
         confidence = "MODERATE"
         
-        # State detection thresholds
-        if ratios['alpha'] > 0.3:
+        # State detection thresholds (adjusted for proper signal processing)
+        if ratios['alpha'] > 0.25:
             state_indicators.append("RELAXED")
             confidence = "HIGH"
         
-        if ratios['beta'] > 0.35:
-            if ratios['alpha'] > 0.25:
+        if ratios['beta'] > 0.30:
+            if ratios['alpha'] > 0.20:
                 state_indicators.append("FOCUSED")
             else:
                 state_indicators.append("ALERT/TENSE")
                 confidence = "HIGH"
         
-        if ratios['theta'] > 0.25:
-            state_indicators.append("CREATIVE/FLOW")
+        if ratios['theta'] > 0.20:
+            if ratios['alpha'] > 0.15:
+                state_indicators.append("CREATIVE/FLOW")
+            else:
+                state_indicators.append("MEDITATIVE")
             confidence = "HIGH"
         
-        if ratios['delta'] > 0.4:
+        if ratios['delta'] > 0.35:
             state_indicators.append("DROWSY")
             confidence = "HIGH"
         
-        if ratios['gamma'] > 0.15:
+        if ratios['gamma'] > 0.12:
             state_indicators.append("PEAK FOCUS")
             confidence = "HIGH"
         
@@ -133,18 +199,20 @@ class ConsciousnessMonitor:
         
         state = " + ".join(state_indicators)
         
-        # Generate insights
+        # Generate insights (updated thresholds)
         insights = []
-        if ratios['beta'] > ratios['alpha'] * 1.5:
+        if ratios['beta'] > ratios['alpha'] * 2:
             insights.append("🚨 Security guard might be active")
-        if ratios['theta'] > 0.2 and ratios['alpha'] > 0.2:
+        if ratios['theta'] > 0.15 and ratios['alpha'] > 0.15:
             insights.append("🌊 Good emotional terrain navigation")
-        if ratios['alpha'] > 0.4:
+        if ratios['alpha'] > 0.35:
             insights.append("😌 Excellent regulation state")
-        if ratios['gamma'] > 0.25:
+        if ratios['gamma'] > 0.20:
             insights.append("⚡ Intense cognitive processing")
-        if ratios['delta'] > 0.5:
+        if ratios['delta'] > 0.45:
             insights.append("😴 Very relaxed/tired state")
+        if ratios['theta'] > 0.30:
+            insights.append("🎨 Creative/flow state active")
             
         return {
             'state': state,
@@ -258,9 +326,9 @@ class ConsciousnessMonitor:
                 time.sleep(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="Consciousness Monitor v2")
+    parser = argparse.ArgumentParser(description="Consciousness Monitor v2 - Real Signal Processing Edition")
     parser.add_argument("--file", "-f", help="CSV file to monitor or analyze")
-    parser.add_argument("--window", "-w", type=float, default=2.0, help="Analysis window in seconds (default: 2.0)")
+    parser.add_argument("--window", "-w", type=float, default=0.75, help="Analysis window in seconds (default: 0.75)")
     parser.add_argument("--update", "-u", type=float, default=1.0, help="Update interval in seconds (default: 1.0)")
     parser.add_argument("--analyze", "-a", action="store_true", help="Analyze entire file instead of real-time monitoring")
     parser.add_argument("--no-bands", action="store_true", help="Hide band power visualization")

@@ -1,0 +1,46 @@
+{
+  "version": "2025-07-28-v5-demo",
+  "description": "Example sub-state configuration demonstrating hierarchical consciousness detection",
+  
+  "meditation_states": {
+    "priority": 1,
+    "conditions": {"alpha_min": 80, "beta_max": 15},
+    "emoji": "🧘",
+    "insights": ["🧘 Meditation state active - deep practice detected"]
+  },
+  
+  "hyperflow": {
+    "priority": 2,
+    "conditions": {"beta_min": 30, "gamma_min": 20, "alpha_min": 60},
+    "emoji": "⚡🌊",
+    "insights": ["⚡ Hyperflow - intense engagement with alpha regulation", "🌊 Peak performance state achieved"]
+  },
+  
+  "nervous_system_recovery": {
+    "priority": 3,
+    "conditions": {"delta_min": 50, "requires_previous_state": "SECURITY GUARD"},
+    "emoji": "💤🛡️",
+    "insights": ["💤 Deep nervous system recovery", "🛡️ Security guard fully stood down"]
+  },
+  
+  "creative_breakthrough": {
+    "priority": 4,
+    "conditions": {"theta_min": 35, "alpha_min": 25, "gamma_min": 10},
+    "emoji": "🎨💡",
+    "insights": ["🎨 Creative breakthrough state", "💡 Inspiration and insight flowing"]
+  },
+  
+  "therapeutic_dialogue": {
+    "priority": 5,
+    "conditions": {"alpha_min": 40, "alpha_max": 70, "theta_min": 20, "delta_min": 15},
+    "emoji": "🗣️💝",
+    "insights": ["🗣️ Active internal dialogue detected", "💝 Parts communication in progress"]
+  },
+  
+  "transcendent_awareness": {
+    "priority": 6,
+    "conditions": {"alpha_min": 85, "theta_max": 8, "beta_max": 8, "delta_max": 10},
+    "emoji": "✨🌌",
+    "insights": ["✨ Transcendent awareness - beyond ordinary consciousness", "🌌 Pure awareness without object"]
+  }
+}

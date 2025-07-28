@@ -109,12 +109,78 @@ class EnhancedConsciousnessMonitor:
         self.db_changes = {}
         
         # Configuration-driven detection rules with version tracking
-        self.RULE_VERSION = "2025-07-28-v4"
+        self.RULE_VERSION = "2025-07-28-v5"
         self.CHANGELOG = {
             "2025-07-27-v1": "Initial therapeutic patterns", 
             "2025-07-27-v2": "Fixed jhana detection, added meditation exemption, configuration-driven rules",
             "2025-07-27-v3": "Added Startled state detection - healthy startle response with beta spike + maintained alpha",
-            "2025-07-28-v4": "Distinguished Flow State from Jhana - Added Flow State (70-89% alpha, 10-30% beta), refined Jhana to 90%+ alpha for pure consciousness"
+            "2025-07-28-v4": "Distinguished Flow State from Jhana - Added Flow State (70-89% alpha, 10-30% beta), refined Jhana to 90%+ alpha for pure consciousness",
+            "2025-07-28-v5": "Added artifact filtering and hierarchical sub-state detection system with maintainable architecture"
+        }
+        
+        # Artifact filtering thresholds
+        self.ARTIFACT_THRESHOLDS = {
+            "multiband_spike": 90,  # dB spike across multiple bands simultaneously
+            "impossible_combo_alpha": 95,  # Alpha > 95% with high beta
+            "impossible_combo_beta": 30,   # Beta threshold for impossible combo
+            "extreme_shift": 300,   # Total dB change across all bands
+            "simultaneous_bands": 3  # Number of bands spiking to trigger artifact detection
+        }
+        
+        # Hierarchical sub-state detection system
+        self.SUB_STATE_RULES = {
+            "flow_state": {
+                "base_conditions": {"alpha_min": 70, "alpha_max": 89},
+                "sub_states": {
+                    "engaged": {
+                        "conditions": {"beta_min": 15, "beta_max": 30},
+                        "display": "FLOW - ENGAGED",
+                        "emoji": "🌊⚡",
+                        "insights": ["🌊 Active flow - engaged problem solving", "🎯 Optimal performance zone activated"]
+                    },
+                    "absorbed": {
+                        "conditions": {"beta_max": 10, "alpha_min": 85},
+                        "display": "FLOW - ABSORBED", 
+                        "emoji": "🌊🧘",
+                        "insights": ["🌊 Deep flow - micro-transcendence within task", "✨ Brief dissolution of thinking mind"]
+                    },
+                    "processing": {
+                        "conditions": {"beta_min": 20, "gamma_min": 15},
+                        "display": "FLOW - PROCESSING",
+                        "emoji": "🌊🧠", 
+                        "insights": ["🌊 Flow processing - analytical breakthrough", "⚡ Intense cognitive engagement"]
+                    },
+                    "creative": {
+                        "conditions": {"theta_min": 20, "alpha_min": 75},
+                        "display": "FLOW - CREATIVE",
+                        "emoji": "🌊🎨",
+                        "insights": ["🌊 Creative flow breakthrough", "🎨 Artistic inspiration active"]
+                    }
+                }
+            },
+            "jhana": {
+                "base_conditions": {"alpha_min": 90, "beta_max": 10},
+                "sub_states": {
+                    "entry": {
+                        "conditions": {"alpha_min": 90, "alpha_max": 95},
+                        "display": "JHANA - ENTRY",
+                        "emoji": "🧘🚪",
+                        "insights": ["🧘 Jhana entry - absorption beginning", "✨ Transcendence threshold crossed"]
+                    },
+                    "stable": {
+                        "conditions": {"alpha_min": 95, "delta_max": 10},
+                        "display": "JHANA - STABLE",
+                        "emoji": "🧘✨",
+                        "insights": ["🧘 Stable jhana - pure consciousness", "🕉️ Complete absorption achieved"]
+                    },
+                    "deepening": {
+                        "conditions": {"alpha_min": 97, "theta_max": 5, "beta_max": 5},
+                        "display": "JHANA - DEEPENING",
+                        "emoji": "🧘🌌",
+                        "insights": ["🧘 Deepening jhana - approaching formless", "🌌 Consciousness dissolving into unity"]
+                    }
+                }
+            }
         }
         
         # Maintainable detection rules as configuration
@@ -240,6 +306,7 @@ class EnhancedConsciousnessMonitor:
             self._load_rules_from_file(load_rules)
         if tune_rules:
             self._apply_rule_tuning(tune_rules)
+            self._apply_artifact_tuning(tune_rules)
         
         mode = "Pre-computed Features" if use_precomputed else "Raw Signal Processing"
         konrad_suffix = " | KONRAD MODE" if konrad_mode else ""
@@ -255,6 +322,8 @@ class EnhancedConsciousnessMonitor:
         if debug:
             print(f"🔍 Debug Mode: Rule testing enabled | Available rules: {len(self.DETECTION_RULES)}")
         print("🧠 Therapeutic Patterns: Jhana States, Parts Work (Young/Hopeful/Cautious), Startled Response, Safety Visualization")
+        print("🔍 Sub-States: Flow (Engaged/Absorbed/Processing/Creative), Jhana (Entry/Stable/Deepening)")
+        print("⚠️ Artifact Filtering: Multi-band spikes, impossible combinations, extreme shifts")
         print("=" * 70)
     
     def _detect_sample_rate(self):
@@ -670,6 +739,96 @@ class EnhancedConsciousnessMonitor:
         
         return results
     
+    def detect_artifacts(self, bands, db_changes):
+        """Detect and filter obvious data artifacts before state detection"""
+        try:
+            # Multi-band simultaneous spike (classic artifact)
+            simultaneous_spikes = sum(1 for change in db_changes.values() 
+                                     if abs(change) > self.ARTIFACT_THRESHOLDS["multiband_spike"])
+            if simultaneous_spikes >= self.ARTIFACT_THRESHOLDS["simultaneous_bands"]:
+                return "ARTIFACT_MULTIBAND_SPIKE"
+            
+            # Impossible value combinations
+            alpha_percent = bands.get('alpha', 0)
+            beta_percent = bands.get('beta', 0)
+            if (alpha_percent > self.ARTIFACT_THRESHOLDS["impossible_combo_alpha"] and 
+                beta_percent > self.ARTIFACT_THRESHOLDS["impossible_combo_beta"]):
+                return "ARTIFACT_IMPOSSIBLE_COMBO"
+            
+            # Sudden extreme shifts from baseline
+            total_change = sum(abs(change) for change in db_changes.values())
+            if total_change > self.ARTIFACT_THRESHOLDS["extreme_shift"]:
+                return "ARTIFACT_EXTREME_SHIFT"
+            
+            return None  # No artifact detected
+            
+        except Exception as e:
+            if self.debug:
+                print(f"Debug - Artifact detection error: {e}")
+            return None
+    
+    def detect_sub_state(self, base_state_name, bands, db_changes):
+        """Detect sub-states within a base state"""
+        try:
+            if base_state_name not in self.SUB_STATE_RULES:
+                return None
+            
+            sub_state_config = self.SUB_STATE_RULES[base_state_name]
+            
+            # Check base conditions first
+            base_conditions = sub_state_config.get("base_conditions", {})
+            if not self._test_conditions(base_conditions, bands, db_changes):
+                return None
+            
+            # Test sub-states in order of specificity (most specific first)
+            sub_states = sub_state_config.get("sub_states", {})
+            for sub_name, sub_config in sub_states.items():
+                conditions = sub_config.get("conditions", {})
+                if self._test_conditions(conditions, bands, db_changes):
+                    return {
+                        "name": sub_name,
+                        "display": sub_config.get("display", f"{base_state_name.upper()} - {sub_name.upper()}"),
+                        "emoji": sub_config.get("emoji", "🧠"),
+                        "insights": sub_config.get("insights", [])
+                    }
+            
+            return None
+            
+        except Exception as e:
+            if self.debug:
+                print(f"Debug - Sub-state detection error: {e}")
+            return None
+    
+    def _test_conditions(self, conditions, bands, db_changes):
+        """Test generic conditions for both base and sub-states"""
+        try:
+            for condition, value in conditions.items():
+                if condition.endswith('_min') and not condition.endswith('_db_change_min'):
+                    band_name = condition[:-4]
+                    if bands.get(band_name, 0) < value:
+                        return False
+                elif condition.endswith('_max') and not condition.endswith('_db_change_max'):
+                    band_name = condition[:-4]
+                    if bands.get(band_name, 0) > value:
+                        return False
+                elif condition.endswith('_db_change_min'):
+                    band_name = condition.replace('_db_change_min', '')
+                    db_change_key = f'{band_name}_db_change'
+                    if db_changes.get(db_change_key, 0) < value:
+                        return False
+                elif condition.endswith('_db_change_max'):
+                    band_name = condition.replace('_db_change_max', '')
+                    db_change_key = f'{band_name}_db_change'
+                    if db_changes.get(db_change_key, 0) > value:
+                        return False
+            
+            return True
+            
+        except Exception as e:
+            if self.debug:
+                print(f"Debug - Condition testing error: {e}")
+            return False
+
     def interpret_enhanced_state(self, eeg_analysis, optics_analysis=None):
         """Enhanced mental state interpretation including fNIRS data with robust error handling"""
         try:
@@ -703,7 +862,7 @@ class EnhancedConsciousnessMonitor:
             else:
                 return self._get_no_signal_result()
             
-            # Configuration-driven state detection with maintainable architecture
+            # Modular detection pipeline: Artifact filtering -> Base state -> Sub-state
             
             # Initialize insights list
             enhanced_insights = []
@@ -714,20 +873,60 @@ class EnhancedConsciousnessMonitor:
             alpha_db_change = self.db_changes.get('alpha', 0.0)
             gamma_db_change = self.db_changes.get('gamma', 0.0)
             
+            db_changes_dict = {
+                'delta_db_change': delta_db_change,
+                'beta_db_change': beta_db_change, 
+                'alpha_db_change': alpha_db_change,
+                'gamma_db_change': gamma_db_change
+            }
+            
             # Debug mode output
             if self.debug:
                 print(f"Debug - Band %: Alpha={percentage_ratios.get('alpha', 0):.1f}% Beta={percentage_ratios.get('beta', 0):.1f}% Delta={percentage_ratios.get('delta', 0):.1f}% Theta={percentage_ratios.get('theta', 0):.1f}% Gamma={percentage_ratios.get('gamma', 0):.1f}%")
                 print(f"Debug - dB changes: Alpha={alpha_db_change:+.1f} Beta={beta_db_change:+.1f} Delta={delta_db_change:+.1f}")
             
-            # Test rules in priority order
-            detected_state = self._evaluate_detection_rules(percentage_ratios, {
-                'delta_db_change': delta_db_change,
-                'beta_db_change': beta_db_change, 
-                'alpha_db_change': alpha_db_change,
-                'gamma_db_change': gamma_db_change
-            })
+            # Step 1: Artifact filtering (prevents false positives)
+            artifact = self.detect_artifacts(percentage_ratios, db_changes_dict)
+            if artifact:
+                return {
+                    'state': "DATA ARTIFACT",
+                    'confidence': "HIGH",
+                    'insights': ["⚠️ Data artifact detected - ignoring reading", f"🔍 Artifact type: {artifact}"],
+                    'ratios': percentage_ratios,
+                    'quality': base_interpretation.get('quality', {}),
+                    'optics': optics_analysis,
+                    'fnirs': 0
+                }
             
+            # Step 2: Base state detection  
+            detected_state = self._evaluate_detection_rules(percentage_ratios, db_changes_dict)
+            
+            # Step 3: Sub-state refinement
+            sub_state = None
             if detected_state:
+                base_state_name = detected_state['state'].lower().replace(' ', '_')
+                sub_state = self.detect_sub_state(base_state_name, percentage_ratios, db_changes_dict)
+                
+                # Also check if we can detect sub-states for related states
+                if not sub_state:
+                    # Check if current state could be a base state for sub-detection
+                    related_states = {
+                        'relaxed': 'flow_state',  # Relaxed state might be flow
+                        'meditative': 'jhana'     # Meditative might be jhana
+                    }
+                    related_base = related_states.get(base_state_name)
+                    if related_base:
+                        sub_state = self.detect_sub_state(related_base, percentage_ratios, db_changes_dict)
+            
+            # Step 4: Combine base and sub-state
+            if sub_state:
+                state_indicators = [sub_state['display']]
+                emoji = sub_state['emoji'] 
+                confidence = "HIGH"
+                enhanced_insights.extend(sub_state['insights'])
+                if self.debug:
+                    print(f"Debug - Sub-state detected: {sub_state['name']} for base {detected_state['state']}")
+            elif detected_state:
                 state_indicators = [detected_state['state']]
                 emoji = detected_state['emoji']
                 confidence = "HIGH"
@@ -968,8 +1167,20 @@ class EnhancedConsciousnessMonitor:
                         print(f"🔧 Tuned {rule_name}.{param}: {old_value} → {value}")
                     else:
                         print(f"⚠️ Unknown parameter {rule_name}.{param}")
-            else:
+            elif rule_name != "artifact":  # Skip artifact rules here, handled separately
                 print(f"⚠️ Unknown rule: {rule_name}")
+    
+    def _apply_artifact_tuning(self, tune_rules):
+        """Apply artifact threshold tuning"""
+        if "artifact" in tune_rules:
+            artifact_params = tune_rules["artifact"]
+            for param, value in artifact_params.items():
+                if param in self.ARTIFACT_THRESHOLDS:
+                    old_value = self.ARTIFACT_THRESHOLDS[param]
+                    self.ARTIFACT_THRESHOLDS[param] = value
+                    print(f"🔧 Tuned artifact.{param}: {old_value} → {value}")
+                else:
+                    print(f"⚠️ Unknown artifact parameter: {param}")
     
     def display_enhanced_results(self, interpretation, timestamp=None):
         """Display enhanced analysis results with smart output system"""
@@ -1885,7 +2096,7 @@ def main():
     parser.add_argument("--output-interval", type=float, help="Force output every N seconds (overrides smart detection)")
     parser.add_argument("--debug", action="store_true", help="Show debug information about data updates and rule testing")
     parser.add_argument("--konrad-mode", action="store_true", help="Enable Konrad's personalized detection patterns (dB-based Security Guard detection)")
-    parser.add_argument("--tune-rule", action="append", help="Tune rule parameters (e.g. --tune-rule jhana.alpha_min=85)")
+    parser.add_argument("--tune-rule", action="append", help="Tune rule parameters (e.g. --tune-rule jhana.alpha_min=85 or --tune-rule artifact.multiband_spike=85)")
     parser.add_argument("--load-rules", help="Load detection rules from JSON file")
     
     args = parser.parse_args()

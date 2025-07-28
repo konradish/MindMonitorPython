@@ -109,11 +109,12 @@ class EnhancedConsciousnessMonitor:
         self.db_changes = {}
         
         # Configuration-driven detection rules with version tracking
-        self.RULE_VERSION = "2025-07-27-v3"
+        self.RULE_VERSION = "2025-07-28-v4"
         self.CHANGELOG = {
             "2025-07-27-v1": "Initial therapeutic patterns", 
             "2025-07-27-v2": "Fixed jhana detection, added meditation exemption, configuration-driven rules",
-            "2025-07-27-v3": "Added Startled state detection - healthy startle response with beta spike + maintained alpha"
+            "2025-07-27-v3": "Added Startled state detection - healthy startle response with beta spike + maintained alpha",
+            "2025-07-28-v4": "Distinguished Flow State from Jhana - Added Flow State (70-89% alpha, 10-30% beta), refined Jhana to 90%+ alpha for pure consciousness"
         }
         
         # Maintainable detection rules as configuration
@@ -130,78 +131,84 @@ class EnhancedConsciousnessMonitor:
             },
             "jhana": {
                 "priority": 2,
-                "conditions": {"alpha_min": 80, "beta_max": 15},
+                "conditions": {"alpha_min": 90, "beta_max": 10, "gamma_max": 15, "delta_max": 20},
                 "emoji": "🧘",
-                "insights": ["🧘 Deep meditative absorption state", "✨ Near-pure consciousness - thinking mind offline"]
+                "insights": ["🧘 Authentic jhana state - pure consciousness", "✨ Thinking mind completely dissolved", "🕉️ Transcendent absorption achieved"]
+            },
+            "flow_state": {
+                "priority": 3,
+                "conditions": {"alpha_min": 70, "alpha_max": 89, "beta_min": 10, "beta_max": 30, "gamma_max": 50},
+                "emoji": "🌊",
+                "insights": ["🌊 Deep flow state - engaged concentration", "🎯 Optimal performance zone activated", "⚡ Mind fully absorbed in task"]
             },
             "young_part": {
-                "priority": 3,
+                "priority": 4,
                 "conditions": {"delta_min": 35, "alpha_min": 30, "alpha_max": 40, "theta_min": 15},
                 "emoji": "💝",
                 "insights": ["💝 Young part present - vulnerable, childlike state", "🤗 Delta dominance indicates soft, trusting energy"]
             },
             "hopeful_part": {
-                "priority": 4,
+                "priority": 5,
                 "conditions": {"alpha_min": 75, "alpha_max": 80, "beta_max": 15, "delta_max": 20},
                 "emoji": "🌟",
                 "insights": ["🌟 Hopeful part engaged - optimistic consciousness"]
             },
             "startled": {
-                "priority": 5,
+                "priority": 6,
                 "conditions": {"beta_min": 40, "beta_max": 55, "alpha_min": 35, "alpha_max": 55, "beta_db_change_min": 2.0},
                 "emoji": "😲",
                 "insights": ["😲 Healthy startle response - alert but regulated", "🛡️ Nervous system responding appropriately to surprise"]
             },
             "cautious_part": {
-                "priority": 6,
+                "priority": 7,
                 "conditions": {"alpha_min": 50, "alpha_max": 70, "delta_min": 15, "beta_min": 15},
                 "emoji": "🛡️",
                 "insights": ["🛡️ Cautious part assessing - protective awareness"]
             },
             "recovery": {
-                "priority": 7,
+                "priority": 8,
                 "conditions": {"delta_min": 40, "requires_previous_state": "SECURITY GUARD"},
                 "emoji": "🛡️",
                 "insights": ["😮‍💨 Nervous system recovering from hypervigilance", "🛡️ Security guard standing down"]
             },
             "relaxed": {
-                "priority": 8,
+                "priority": 9,
                 "conditions": {"alpha_min": 40},  # Konrad's personalized threshold
                 "emoji": "🌊",
                 "insights": ["😌 Excellent regulation state"]
             },
             "focused": {
-                "priority": 9,
+                "priority": 10,
                 "conditions": {"beta_min": 35, "alpha_min": 25},
                 "emoji": "🎯",
                 "insights": []
             },
             "alert_tense": {
-                "priority": 10,
+                "priority": 11,
                 "conditions": {"beta_min": 35, "alpha_max": 25},
                 "emoji": "🔴",
                 "insights": []
             },
             "creative_flow": {
-                "priority": 11,
+                "priority": 12,
                 "conditions": {"theta_min": 30, "alpha_min": 20},
                 "emoji": "🎨",
                 "insights": ["🎨 Creative/flow state active"]
             },
             "meditative": {
-                "priority": 12,
+                "priority": 13,
                 "conditions": {"theta_min": 30, "alpha_max": 20},
                 "emoji": "🧘",
                 "insights": []
             },
             "drowsy": {
-                "priority": 13,
+                "priority": 14,
                 "conditions": {"delta_min": 40},
                 "emoji": "😴",
                 "insights": ["😴 Very relaxed/tired state"]
             },
             "peak_focus": {
-                "priority": 14,
+                "priority": 15,
                 "conditions": {"gamma_min": 25, "alpha_min": 20},
                 "emoji": "⚡",
                 "insights": ["⚡ Peak focus - productive concentration"]
@@ -1115,6 +1122,8 @@ class EnhancedConsciousnessMonitor:
             return "🛡️"
         elif "ALERT" in state or "TENSE" in state:
             return "🔴"
+        elif "FLOW STATE" in state:
+            return "🌊"
         elif "RELAXED" in state:
             return "🌊"
         elif "FOCUSED" in state:

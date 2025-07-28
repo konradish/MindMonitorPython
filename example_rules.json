@@ -1,0 +1,20 @@
+{
+  "experimental_jhana": {
+    "priority": 2,
+    "conditions": {"alpha_min": 85, "beta_max": 10},
+    "emoji": "🧘",
+    "insights": ["🧘 Experimental high-threshold jhana state", "✨ Ultra-pure consciousness detected"]
+  },
+  "sensitive_startle": {
+    "priority": 5,
+    "conditions": {"beta_min": 35, "beta_max": 50, "alpha_min": 30, "alpha_max": 60, "beta_db_change_min": 1.5},
+    "emoji": "😯",
+    "insights": ["😯 Sensitive startle response - lower threshold for highly reactive nervous systems"]
+  },
+  "deep_flow": {
+    "priority": 15,
+    "conditions": {"theta_min": 35, "alpha_min": 30, "gamma_min": 15},
+    "emoji": "🌊",
+    "insights": ["🌊 Deep flow state - creative + focus + relaxation"]
+  }
+}

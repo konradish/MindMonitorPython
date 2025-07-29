@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append('/mnt/c/projects/MindMonitorPython')
 
-from consciousness_monitor_enhanced import EnhancedConsciousnessMonitor
+from consciousness_monitor import EnhancedConsciousnessMonitor
 
 def test_therapeutic_patterns():
     """Test all therapeutic EEG patterns"""
@@ -132,11 +132,11 @@ def test_therapeutic_patterns():
     
     print()
     print("🚀 USAGE EXAMPLES:")
-    print("   Basic monitoring:    uv run python consciousness_monitor_enhanced.py --konrad-mode")
-    print("   Debug mode:          uv run python consciousness_monitor_enhanced.py --debug")
-    print("   Tune thresholds:     uv run python consciousness_monitor_enhanced.py --tune-rule jhana.alpha_min=85")
-    print("   Load custom rules:   uv run python consciousness_monitor_enhanced.py --load-rules my_rules.json")
-    print("   Analyze recording:   uv run python consciousness_monitor_enhanced.py --analyze --file recording.csv")
+    print("   Basic monitoring:    uv run python consciousness_monitor.py --konrad-mode")
+    print("   Debug mode:          uv run python consciousness_monitor.py --debug")
+    print("   Tune thresholds:     uv run python consciousness_monitor.py --tune-rule jhana.alpha_min=85")
+    print("   Load custom rules:   uv run python consciousness_monitor.py --load-rules my_rules.json")
+    print("   Analyze recording:   uv run python consciousness_monitor.py --analyze --file recording.csv")
 
 if __name__ == "__main__":
     test_therapeutic_patterns()

@@ -12,8 +12,7 @@ The project consists of four main components:
 
 1. **OSC Data Reception** (`OSC Receiver.py`) - Receives live EEG data via OSC protocol on UDP port 5000 and records to CSV
 2. **Real-time Analysis** (`realtime_consciousness_analyzer.py`) - Basic consciousness state monitoring from CSV data
-3. **Advanced Analysis** (`consciousness_monitor.py`) - Professional-grade signal processing with clinical EEG band analysis
-4. **Therapeutic Edition** (`consciousness_monitor_enhanced.py`) - Enhanced v4 with maintainable architecture and therapeutic pattern detection
+3. **Enhanced Consciousness Monitor** (`consciousness_monitor.py`) - Professional-grade signal processing with clinical EEG band analysis and therapeutic pattern detection
 
 ### Data Flow
 1. Muse headband → Mind Monitor app → OSC UDP packets → Python receiver → CSV file
@@ -49,22 +48,22 @@ uv run python realtime_consciousness_analyzer.py
 # Advanced consciousness monitoring with signal processing
 uv run python consciousness_monitor.py
 
-# Enhanced therapeutic edition with maintainable architecture (RECOMMENDED)
-uv run python consciousness_monitor_enhanced.py --konrad-mode
+# Enhanced consciousness monitoring with therapeutic patterns (RECOMMENDED)
+uv run python consciousness_monitor.py --konrad-mode
 
 # Debug mode to see rule evaluation process
-uv run python consciousness_monitor_enhanced.py --debug --konrad-mode
+uv run python consciousness_monitor.py --debug --konrad-mode
 
 # Tune detection thresholds without code changes
-uv run python consciousness_monitor_enhanced.py --tune-rule jhana.alpha_min=85
+uv run python consciousness_monitor.py --tune-rule jhana.alpha_min=85
 
 # Load custom therapeutic rules
-uv run python consciousness_monitor_enhanced.py --load-rules example_rules.json
+uv run python consciousness_monitor.py --load-rules example_rules.json
 
 # Analyze existing recording with therapeutic patterns
-uv run python consciousness_monitor_enhanced.py --analyze --file "recording.csv" --konrad-mode
+uv run python consciousness_monitor.py --analyze --file "recording.csv" --konrad-mode
 
-# Legacy examples (consciousness_monitor.py)
+# Basic examples with custom parameters
 uv run python consciousness_monitor.py --window 0.75 --update 1
 uv run python consciousness_monitor.py --analyze --file "recording.csv"
 ```
@@ -94,8 +93,7 @@ uv run python consciousness_monitor.py --analyze --file "recording.csv"
 ## File Structure
 
 - `OSC Receiver*.py` - OSC data reception variants (simple, audio feedback, CSV recording)
-- `consciousness_monitor_enhanced.py` - **Enhanced v4 Therapeutic Edition** (RECOMMENDED)
-- `consciousness_monitor.py` - Advanced analysis with clinical-grade signal processing (Legacy)
+- `consciousness_monitor.py` - **Enhanced consciousness monitor with therapeutic patterns** (RECOMMENDED)
 - `realtime_consciousness_analyzer.py` - Basic real-time monitoring
 - `test_therapeutic_patterns.py` - Comprehensive test suite for therapeutic patterns
 - `example_rules.json` - Example external rules configuration
@@ -104,9 +102,9 @@ uv run python consciousness_monitor.py --analyze --file "recording.csv"
 
 ## Mental State Analysis
 
-### Enhanced Therapeutic Edition v4 (consciousness_monitor_enhanced.py)
+### Enhanced Consciousness Monitor (consciousness_monitor.py)
 
-The enhanced monitor uses validated EEG band power ratios with **maintainable configuration-driven detection** to identify:
+The consciousness monitor uses validated EEG band power ratios with **maintainable configuration-driven detection** to identify:
 
 #### **Core Therapeutic Patterns:**
 - **JHANA/TRANSCENDENT** (80%+ alpha, <15% beta) - Deep meditative absorption states
@@ -140,11 +138,8 @@ The enhanced monitor uses validated EEG band power ratios with **maintainable co
 - **Emotional regulation** tracking (security guard patterns)
 - **Therapeutic progress** measurement (healthy vs. dysregulated responses)
 
-### Legacy Analysis (consciousness_monitor.py)
 
-Basic EEG patterns: RELAXED, FOCUSED, ALERT/TENSE, CREATIVE/FLOW, MEDITATIVE, DROWSY, PEAK FOCUS with "security guard" detection.
-
-## Maintainable Architecture (Enhanced v4)
+## Maintainable Architecture
 
 ### Configuration-Driven Detection Rules
 
@@ -167,13 +162,13 @@ Adjust thresholds without code changes:
 
 ```bash
 # Increase jhana alpha threshold
-uv run python consciousness_monitor_enhanced.py --tune-rule jhana.alpha_min=85
+uv run python consciousness_monitor.py --tune-rule jhana.alpha_min=85
 
 # Lower security guard sensitivity
-uv run python consciousness_monitor_enhanced.py --tune-rule security_guard.alpha_exemption=75
+uv run python consciousness_monitor.py --tune-rule security_guard.alpha_exemption=75
 
 # Multiple tuning options
-uv run python consciousness_monitor_enhanced.py --tune-rule jhana.alpha_min=85 --tune-rule startled.beta_db_change_min=1.5
+uv run python consciousness_monitor.py --tune-rule jhana.alpha_min=85 --tune-rule startled.beta_db_change_min=1.5
 ```
 
 ### External Rules Loading
@@ -182,10 +177,10 @@ Load experimental or personalized rule sets:
 
 ```bash
 # Load custom therapeutic rules
-uv run python consciousness_monitor_enhanced.py --load-rules my_therapeutic_rules.json
+uv run python consciousness_monitor.py --load-rules my_therapeutic_rules.json
 
 # Test experimental patterns
-uv run python consciousness_monitor_enhanced.py --load-rules experimental_rules.json
+uv run python consciousness_monitor.py --load-rules experimental_rules.json
 ```
 
 ### Rule Development and Testing
@@ -194,7 +189,7 @@ Debug mode shows rule evaluation process:
 
 ```bash
 # See which rules are tested and why they pass/fail
-uv run python consciousness_monitor_enhanced.py --debug --konrad-mode
+uv run python consciousness_monitor.py --debug --konrad-mode
 
 # Test specific patterns
 uv run python test_therapeutic_patterns.py

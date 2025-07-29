@@ -4,7 +4,7 @@
 import sys
 sys.path.insert(0, '.')
 
-from consciousness_monitor_enhanced import EnhancedConsciousnessMonitor
+from consciousness_monitor import EnhancedConsciousnessMonitor
 
 def test_detection_rules():
     """Test the new Flow State and refined Jhana detection"""

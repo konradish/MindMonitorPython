@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from consciousness_monitor_enhanced import EnhancedConsciousnessMonitor
+from consciousness_monitor import EnhancedConsciousnessMonitor
 
 def test_artifact_filtering():
     """Test artifact filtering functionality"""

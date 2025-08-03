@@ -4,6 +4,59 @@
 
 Enhanced Consciousness Monitor v5 introduces a flexible sub-state system with robust artifact filtering while maintaining easy configuration and expansion capabilities. This represents a major architecture upgrade enabling nuanced consciousness mapping and reliable therapeutic pattern detection.
 
+## 🏗️ **NEW: Modular Architecture Refactoring**
+
+### Complete System Restructure
+The monolithic `consciousness_monitor.py` (2527 lines) has been completely refactored into a clean, maintainable modular architecture:
+
+```
+consciousness_monitor/           # Python package
+├── __init__.py & __main__.py   # Package entry points  
+├── main.py                     # Core orchestrator (540 lines)
+├── config/                     # Configuration management
+│   ├── detection_rules.json   # External rule definitions
+│   ├── sub_states.json        # Hierarchical sub-states  
+│   ├── artifact_thresholds.json # Artifact filtering
+│   └── *.py files             # Rule/threshold managers
+├── data/                       # Data processing & parsing
+│   ├── parsers.py             # EEG format detection & parsing
+│   ├── processors.py          # Signal processing (FFT, bands)
+│   └── models.py              # Data structures
+├── detection/                  # Pattern detection & analysis
+│   ├── engine.py              # Core detection engine
+│   ├── patterns.py            # Therapeutic pattern analysis
+│   ├── artifacts.py           # Artifact filtering
+│   └── sub_states.py          # Sub-state detection
+├── ui/                        # Display & user interface
+│   ├── display.py             # Console formatting
+│   └── commands.py            # Interactive commands
+└── utils/                     # Mathematical helpers
+    ├── math_helpers.py        # Signal math, dB conversion
+    └── validation.py          # Data validation
+```
+
+### Architecture Benefits
+- **18 focused modules** instead of 1 monolithic file
+- Each module **<300 lines** with single responsibility
+- **Maintainable** with clean interfaces between components  
+- **Extensible** - new features don't require touching core logic
+- **Testable** - individual components can be tested in isolation
+- **Backward compatible** - all existing functionality preserved
+
+### Dual Entry Points
+```bash
+# Legacy direct script (still works)
+uv run python consciousness_monitor.py --konrad-mode
+
+# New package module (recommended)  
+uv run python -m consciousness_monitor --konrad-mode
+```
+
+### Critical Bug Fixes
+- **NumPy Array Comparison Error**: Fixed "The truth value of an array with more than one element is ambiguous" that was causing NO_SIGNAL results
+- **Channel Data Processing**: Fixed boolean conversion issues in EEG channel extraction
+- **Signal Processing Pipeline**: Resolved data flow interruptions between modules
+
 ## 🛡️ Critical Fix: Artifact Filtering
 
 ### Problem Solved

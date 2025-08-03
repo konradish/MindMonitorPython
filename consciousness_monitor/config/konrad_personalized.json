@@ -1,0 +1,22 @@
+{
+  "version": "2025-07-28-v5",
+  "description": "Konrad's personalized detection patterns and legacy rule compatibility",
+  "legacy_rules": {
+    "security_guard": {
+      "delta_spike_db": 6.0,
+      "beta_spike_db": 6.0,
+      "alpha_drop_db": -2.0
+    },
+    "excellent_regulation": {
+      "alpha_percent": 50.0
+    },
+    "relaxed": {
+      "alpha_percent": 40.0
+    }
+  },
+  "personalized_thresholds": {
+    "relaxed_alpha_threshold": 40.0,
+    "security_guard_enabled": true,
+    "meditation_exemption_enabled": true
+  }
+}

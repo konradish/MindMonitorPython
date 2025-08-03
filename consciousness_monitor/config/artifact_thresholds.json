@@ -1,0 +1,31 @@
+{
+  "version": "2025-07-28-v5",
+  "description": "Artifact filtering thresholds for EEG data quality control",
+  "thresholds": {
+    "multiband_spike": {
+      "value": 90,
+      "description": "dB spike across multiple bands simultaneously",
+      "unit": "dB"
+    },
+    "impossible_combo_alpha": {
+      "value": 95,
+      "description": "Alpha percentage threshold for impossible combinations",
+      "unit": "percentage"
+    },
+    "impossible_combo_beta": {
+      "value": 30,
+      "description": "Beta threshold for impossible combo detection",
+      "unit": "percentage"
+    },
+    "extreme_shift": {
+      "value": 300,
+      "description": "Total dB change across all bands threshold",
+      "unit": "dB"
+    },
+    "simultaneous_bands": {
+      "value": 3,
+      "description": "Number of bands spiking to trigger artifact detection",
+      "unit": "count"
+    }
+  }
+}

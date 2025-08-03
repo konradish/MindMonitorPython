@@ -12,7 +12,45 @@ The project consists of four main components:
 
 1. **OSC Data Reception** (`OSC Receiver.py`) - Receives live EEG data via OSC protocol on UDP port 5000 and records to CSV
 2. **Real-time Analysis** (`realtime_consciousness_analyzer.py`) - Basic consciousness state monitoring from CSV data
-3. **Enhanced Consciousness Monitor** (`consciousness_monitor.py`) - Professional-grade signal processing with clinical EEG band analysis and therapeutic pattern detection
+3. **Enhanced Consciousness Monitor** (`consciousness_monitor/`) - **Modular architecture** with professional-grade signal processing, clinical EEG band analysis and therapeutic pattern detection
+
+### New Modular Architecture (consciousness_monitor/)
+
+The consciousness monitor has been refactored into a clean, maintainable modular system:
+
+```
+consciousness_monitor/
+├── __init__.py & __main__.py         # Package entry points
+├── main.py                           # Main orchestrator (540 lines)
+├── config/                           # Configuration management
+│   ├── detection_rules.json         # External rule definitions
+│   ├── sub_states.json              # Hierarchical sub-states
+│   ├── artifact_thresholds.json     # Artifact filtering
+│   ├── konrad_personalized.json     # Legacy compatibility
+│   └── *.py files                   # Rule/threshold managers
+├── data/                            # Data processing & parsing
+│   ├── parsers.py                   # EEG data format detection & parsing
+│   ├── processors.py               # Signal processing (FFT, band powers)
+│   └── models.py                    # Data structures (BandPower, AnalysisResult)
+├── detection/                       # Pattern detection & analysis
+│   ├── engine.py                    # Core detection engine
+│   ├── patterns.py                  # Therapeutic pattern analysis
+│   ├── artifacts.py                 # Artifact filtering
+│   └── sub_states.py               # Hierarchical state detection
+├── ui/                             # Display & user interface
+│   ├── display.py                   # Console output formatting
+│   └── commands.py                  # Interactive command handling
+└── utils/                          # Mathematical helpers & validation
+    ├── math_helpers.py              # Signal math, dB conversion
+    └── validation.py                # Data validation utilities
+```
+
+**Benefits:**
+- **18 focused modules** instead of 1 monolithic file (was 2527 lines)
+- Each module **<300 lines** with clear responsibility
+- **Maintainable** with clean interfaces between components
+- **Extensible** architecture for adding new features
+- **Backward compatible** - all existing functionality preserved
 
 ### Data Flow
 1. Muse headband → Mind Monitor app → OSC UDP packets → Python receiver → CSV file
@@ -45,11 +83,13 @@ uv run python "OSC Receiver.py"
 # Real-time consciousness monitoring (basic)
 uv run python realtime_consciousness_analyzer.py
 
-# Advanced consciousness monitoring with signal processing
+# Advanced consciousness monitoring with signal processing (both commands work)
 uv run python consciousness_monitor.py
+uv run python -m consciousness_monitor
 
 # Enhanced consciousness monitoring with therapeutic patterns (RECOMMENDED)
 uv run python consciousness_monitor.py --konrad-mode
+uv run python -m consciousness_monitor --konrad-mode
 
 # Debug mode to see rule evaluation process
 uv run python consciousness_monitor.py --debug --konrad-mode
@@ -92,17 +132,54 @@ uv run python consciousness_monitor.py --analyze --file "recording.csv"
 
 ## File Structure
 
+### Root Level
 - `OSC Receiver*.py` - OSC data reception variants (simple, audio feedback, CSV recording)
-- `consciousness_monitor.py` - **Enhanced consciousness monitor with therapeutic patterns** (RECOMMENDED)
+- `consciousness_monitor/` - **Modular consciousness monitor package** (RECOMMENDED)
 - `realtime_consciousness_analyzer.py` - Basic real-time monitoring
 - `test_therapeutic_patterns.py` - Comprehensive test suite for therapeutic patterns
 - `example_rules.json` - Example external rules configuration
 - `main.py` - Entry point script
 - `OSC-Python-Recording.csv` - Default output file for recorded EEG data
 
+### Consciousness Monitor Package Structure
+```
+consciousness_monitor/
+├── __init__.py                      # Package initialization
+├── __main__.py                      # CLI entry point (python -m consciousness_monitor)
+├── main.py                          # Main orchestrator class
+├── config/
+│   ├── __init__.py                  # Config package
+│   ├── rules.py                     # Rule management
+│   ├── thresholds.py               # Threshold management
+│   ├── settings.py                 # Settings management
+│   ├── detection_rules.json        # Therapeutic pattern rules
+│   ├── sub_states.json             # Sub-state definitions
+│   ├── artifact_thresholds.json    # Artifact detection thresholds
+│   └── konrad_personalized.json    # Personalized settings
+├── data/
+│   ├── __init__.py                  # Data package
+│   ├── models.py                    # Data structures (BandPower, AnalysisResult)
+│   ├── parsers.py                   # EEG data parsing & format detection
+│   └── processors.py               # Signal processing (FFT, filtering)
+├── detection/
+│   ├── __init__.py                  # Detection package
+│   ├── engine.py                    # Core detection engine
+│   ├── patterns.py                  # Therapeutic pattern analysis
+│   ├── artifacts.py                 # Artifact filtering
+│   └── sub_states.py               # Sub-state detection
+├── ui/
+│   ├── __init__.py                  # UI package
+│   ├── display.py                   # Console display formatting
+│   └── commands.py                  # Interactive commands
+└── utils/
+    ├── __init__.py                  # Utils package
+    ├── math_helpers.py              # Mathematical utilities
+    └── validation.py                # Data validation
+```
+
 ## Mental State Analysis
 
-### Enhanced Consciousness Monitor (consciousness_monitor.py)
+### Enhanced Consciousness Monitor (consciousness_monitor/ package)
 
 The consciousness monitor uses validated EEG band power ratios with **maintainable configuration-driven detection** to identify:
 
@@ -138,6 +215,41 @@ The consciousness monitor uses validated EEG band power ratios with **maintainab
 - **Emotional regulation** tracking (security guard patterns)
 - **Therapeutic progress** measurement (healthy vs. dysregulated responses)
 
+
+## Modular Architecture
+
+### Package-Based Organization
+
+The consciousness monitor is now organized as a Python package with clear separation of concerns:
+
+- **`main.py`** - Core orchestration and analysis workflow
+- **`config/`** - All configuration management (rules, thresholds, settings)
+- **`data/`** - Data structures, parsing, and signal processing  
+- **`detection/`** - Pattern detection, artifacts, and state analysis
+- **`ui/`** - Display formatting and interactive commands
+- **`utils/`** - Mathematical helpers and validation utilities
+
+### Development Benefits
+
+- **Focused Modules**: Each file has a single, clear responsibility
+- **Easy Testing**: Individual components can be tested in isolation
+- **Clean Imports**: Clear dependency structure between modules
+- **Extensibility**: New features can be added without touching core logic
+- **Maintainability**: Bug fixes and improvements are isolated to specific modules
+
+### Entry Points
+
+The package supports multiple entry points:
+```bash
+# Direct script execution (legacy compatibility)
+uv run python consciousness_monitor.py --konrad-mode
+
+# Package module execution (recommended)
+uv run python -m consciousness_monitor --konrad-mode
+
+# Help and CLI options
+uv run python -m consciousness_monitor --help
+```
 
 ## Maintainable Architecture
 

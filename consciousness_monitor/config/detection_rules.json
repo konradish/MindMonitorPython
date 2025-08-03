@@ -1,0 +1,285 @@
+{
+  "version": "2025-07-30-v6",
+  "changelog": {
+    "2025-07-27-v1": "Initial therapeutic patterns",
+    "2025-07-27-v2": "Fixed jhana detection, added meditation exemption, configuration-driven rules",
+    "2025-07-27-v3": "Added Startled state detection - healthy startle response with beta spike + maintained alpha",
+    "2025-07-28-v4": "Distinguished Flow State from Jhana - Added Flow State (70-89% alpha, 10-30% beta), refined Jhana to 90%+ alpha for pure consciousness",
+    "2025-07-28-v5": "Added artifact filtering and hierarchical sub-state detection system with maintainable architecture",
+    "2025-07-30-v6": "Added excitement detection - POSITIVE_ACTIVATION (beta+gamma) and LEARNING_FLOW patterns, enhanced ANXIETY_ESCALATION with gamma exclusion to distinguish excitement from anxiety"
+  },
+  "rules": {
+    "security_guard": {
+      "priority": 1,
+      "conditions": {
+        "db_spike": {
+          "delta": 6.0,
+          "beta": 6.0,
+          "alpha_drop": -2.0
+        },
+        "alpha_exemption": 80,
+        "beta_exemption_max": 15,
+        "percentage_fallback": {
+          "beta_min": 25,
+          "gamma_min": 25,
+          "delta_max": 15
+        }
+      },
+      "emoji": "🚨",
+      "insights": [
+        "🚨 Neural threat response detected",
+        "⚡ Hypervigilance mode active"
+      ]
+    },
+    "positive_activation": {
+      "priority": 2,
+      "conditions": {
+        "beta_min": 18,
+        "beta_trend": "increasing",
+        "gamma_min": 15,
+        "alpha_min": 45,
+        "alpha_max": 75
+      },
+      "emoji": "⚡",
+      "insights": [
+        "⚡ Positive engagement detected - learning or anticipation active",
+        "🚀 Excited about new possibilities or discoveries",
+        "🎯 High gamma suggests creative/analytical processing",
+        "💡 Beta increase from opportunity, not threat"
+      ]
+    },
+    "jhana": {
+      "priority": 3,
+      "conditions": {
+        "alpha_min": 90,
+        "beta_max": 10,
+        "gamma_max": 15,
+        "delta_max": 20
+      },
+      "emoji": "🧘",
+      "insights": [
+        "🧘 Authentic jhana state - pure consciousness",
+        "✨ Thinking mind completely dissolved",
+        "🕉️ Transcendent absorption achieved"
+      ]
+    },
+    "learning_flow": {
+      "priority": 4,
+      "conditions": {
+        "alpha_min": 65,
+        "beta_min": 10,
+        "beta_max": 25,
+        "gamma_min": 12,
+        "delta_max": 30
+      },
+      "emoji": "🧠⚡",
+      "insights": [
+        "🧠 Deep learning engagement - optimal discovery state",
+        "⚡ Sustained focus with creative processing active",
+        "🎯 Brain in prime learning/integration mode",
+        "💡 Balanced activation for knowledge acquisition"
+      ]
+    },
+    "flow_state": {
+      "priority": 5,
+      "conditions": {
+        "alpha_min": 70,
+        "alpha_max": 89,
+        "beta_min": 10,
+        "beta_max": 30,
+        "gamma_max": 50
+      },
+      "emoji": "🌊",
+      "insights": [
+        "🌊 Deep flow state - engaged concentration",
+        "🎯 Optimal performance zone activated",
+        "⚡ Mind fully absorbed in task"
+      ]
+    },
+    "young_part": {
+      "priority": 6,
+      "conditions": {
+        "delta_min": 35,
+        "alpha_min": 30,
+        "alpha_max": 40,
+        "theta_min": 15
+      },
+      "emoji": "💝",
+      "insights": [
+        "💝 Young part present - vulnerable, childlike state",
+        "🤗 Delta dominance indicates soft, trusting energy"
+      ]
+    },
+    "hopeful_part": {
+      "priority": 7,
+      "conditions": {
+        "alpha_min": 75,
+        "alpha_max": 80,
+        "beta_max": 15,
+        "delta_max": 20
+      },
+      "emoji": "🌟",
+      "insights": [
+        "🌟 Hopeful part engaged - optimistic consciousness"
+      ]
+    },
+    "startled": {
+      "priority": 8,
+      "conditions": {
+        "beta_min": 40,
+        "beta_max": 55,
+        "alpha_min": 35,
+        "alpha_max": 55,
+        "beta_db_change_min": 2.0
+      },
+      "emoji": "😲",
+      "insights": [
+        "😲 Healthy startle response - alert but regulated",
+        "🛡️ Nervous system responding appropriately to surprise"
+      ]
+    },
+    "anxiety_escalation": {
+      "priority": 9,
+      "conditions": {
+        "beta_trend": "increasing",
+        "beta_min_change": 5,
+        "alpha_min": 40,
+        "gamma_max": 20,
+        "exclude_high_gamma": true
+      },
+      "emoji": "📈",
+      "insights": [
+        "📈 Anxiety building - beta wave escalation detected",
+        "⚠️ Cognitive worry increasing while maintaining some regulation",
+        "🧠 Low gamma suggests worry rather than excitement"
+      ]
+    },
+    "subtle_anxiety": {
+      "priority": 10,
+      "conditions": {
+        "beta_min": 20,
+        "alpha_min": 50,
+        "alpha_max": 85,
+        "delta_max": 25
+      },
+      "emoji": "⚠️",
+      "insights": [
+        "⚠️ Cognitive anxiety with somatic regulation",
+        "🧠 Worried thoughts with regulated nervous system"
+      ]
+    },
+    "integration": {
+      "priority": 11,
+      "conditions": {
+        "delta_min": 25,
+        "delta_max": 45,
+        "alpha_min": 30,
+        "alpha_max": 50,
+        "beta_min": 15,
+        "beta_max": 35,
+        "gamma_db_change_min": 1.5
+      },
+      "emoji": "🧩",
+      "insights": [
+        "🧩 Integration state - processing and filing memories",
+        "💭 Mixed delta/alpha suggests emotional integration",
+        "🗃️ Brain organizing recent experiences into long-term storage"
+      ]
+    },
+    "cautious_part": {
+      "priority": 12,
+      "conditions": {
+        "alpha_min": 50,
+        "alpha_max": 70,
+        "delta_min": 15,
+        "beta_min": 15
+      },
+      "emoji": "🛡️",
+      "insights": [
+        "🛡️ Cautious part assessing - protective awareness",
+        "👁️ Scanning environment for potential threats or concerns"
+      ]
+    },
+    "recovery": {
+      "priority": 13,
+      "conditions": {
+        "delta_min": 40,
+        "requires_previous_state": "SECURITY GUARD"
+      },
+      "emoji": "🛡️",
+      "insights": [
+        "😮‍💨 Nervous system recovering from hypervigilance",
+        "🛡️ Security guard standing down"
+      ]
+    },
+    "relaxed": {
+      "priority": 14,
+      "conditions": {
+        "alpha_min": 40
+      },
+      "emoji": "🌊",
+      "insights": [
+        "😌 Excellent regulation state"
+      ]
+    },
+    "focused": {
+      "priority": 15,
+      "conditions": {
+        "beta_min": 35,
+        "alpha_min": 25
+      },
+      "emoji": "🎯",
+      "insights": []
+    },
+    "alert_tense": {
+      "priority": 16,
+      "conditions": {
+        "beta_min": 35,
+        "alpha_max": 25
+      },
+      "emoji": "🔴",
+      "insights": []
+    },
+    "creative_flow": {
+      "priority": 17,
+      "conditions": {
+        "theta_min": 30,
+        "alpha_min": 20
+      },
+      "emoji": "🎨",
+      "insights": [
+        "🎨 Creative/flow state active"
+      ]
+    },
+    "meditative": {
+      "priority": 18,
+      "conditions": {
+        "theta_min": 30,
+        "alpha_max": 20
+      },
+      "emoji": "🧘",
+      "insights": []
+    },
+    "drowsy": {
+      "priority": 19,
+      "conditions": {
+        "delta_min": 40
+      },
+      "emoji": "😴",
+      "insights": [
+        "😴 Very relaxed/tired state"
+      ]
+    },
+    "peak_focus": {
+      "priority": 20,
+      "conditions": {
+        "gamma_min": 25,
+        "alpha_min": 20
+      },
+      "emoji": "⚡",
+      "insights": [
+        "⚡ Peak focus - productive concentration"
+      ]
+    }
+  }
+}

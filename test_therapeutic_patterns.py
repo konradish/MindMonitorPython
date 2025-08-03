@@ -8,13 +8,13 @@ import sys
 import os
 sys.path.append('/mnt/c/projects/MindMonitorPython')
 
-from consciousness_monitor import EnhancedConsciousnessMonitor
+from consciousness_monitor.main import EnhancedConsciousnessMonitor
 
 def test_therapeutic_patterns():
     """Test all therapeutic EEG patterns"""
     
-    print("🧠 ENHANCED CONSCIOUSNESS MONITOR v4 - THERAPEUTIC EDITION")
-    print("🧪 Testing Maintainable EEG Detection System")
+    print("🧠 ENHANCED CONSCIOUSNESS MONITOR v5 - MODULAR ARCHITECTURE")
+    print("🧪 Testing Modular EEG Detection System")
     print("=" * 60)
     
     # Initialize monitor with Konrad's personalized rules

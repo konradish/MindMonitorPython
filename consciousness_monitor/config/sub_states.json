@@ -1,0 +1,107 @@
+{
+  "version": "2025-07-28-v5",
+  "description": "Hierarchical sub-state detection system for enhanced pattern recognition",
+  "sub_state_rules": {
+    "flow_state": {
+      "base_conditions": {
+        "alpha_min": 70,
+        "alpha_max": 89
+      },
+      "sub_states": {
+        "engaged": {
+          "conditions": {
+            "beta_min": 15,
+            "beta_max": 30
+          },
+          "display": "FLOW - ENGAGED",
+          "emoji": "🌊⚡",
+          "insights": [
+            "🌊 Active flow - engaged problem solving",
+            "🎯 Optimal performance zone activated"
+          ]
+        },
+        "absorbed": {
+          "conditions": {
+            "beta_max": 10,
+            "alpha_min": 85
+          },
+          "display": "FLOW - ABSORBED",
+          "emoji": "🌊🧘",
+          "insights": [
+            "🌊 Deep flow - micro-transcendence within task",
+            "✨ Brief dissolution of thinking mind"
+          ]
+        },
+        "processing": {
+          "conditions": {
+            "beta_min": 20,
+            "gamma_min": 15
+          },
+          "display": "FLOW - PROCESSING",
+          "emoji": "🌊🧠",
+          "insights": [
+            "🌊 Flow processing - analytical breakthrough",
+            "⚡ Intense cognitive engagement"
+          ]
+        },
+        "creative": {
+          "conditions": {
+            "theta_min": 20,
+            "alpha_min": 75
+          },
+          "display": "FLOW - CREATIVE",
+          "emoji": "🌊🎨",
+          "insights": [
+            "🌊 Creative flow breakthrough",
+            "🎨 Artistic inspiration active"
+          ]
+        }
+      }
+    },
+    "jhana": {
+      "base_conditions": {
+        "alpha_min": 90,
+        "beta_max": 10
+      },
+      "sub_states": {
+        "entry": {
+          "conditions": {
+            "alpha_min": 90,
+            "alpha_max": 95
+          },
+          "display": "JHANA - ENTRY",
+          "emoji": "🧘🚪",
+          "insights": [
+            "🧘 Jhana entry - absorption beginning",
+            "✨ Transcendence threshold crossed"
+          ]
+        },
+        "stable": {
+          "conditions": {
+            "alpha_min": 95,
+            "delta_max": 10
+          },
+          "display": "JHANA - STABLE",
+          "emoji": "🧘✨",
+          "insights": [
+            "🧘 Stable jhana - pure consciousness",
+            "🕉️ Complete absorption achieved"
+          ]
+        },
+        "deepening": {
+          "conditions": {
+            "alpha_min": 97,
+            "theta_max": 5,
+            "beta_max": 5
+          },
+          "display": "JHANA - DEEPENING",
+          "emoji": "🧘🌌",
+          "insights": [
+            "🧘 Deepening jhana - approaching formless",
+            "🌌 Consciousness dissolving into unity"
+          ]
+        }
+      }
+    }
+  }
+}

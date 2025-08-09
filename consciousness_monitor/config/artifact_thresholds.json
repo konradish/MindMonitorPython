@@ -1,6 +1,10 @@
 {
-  "version": "2025-07-28-v5",
-  "description": "Artifact filtering thresholds for EEG data quality control",
+  "version": "2025-08-03-v6",
+  "description": "Artifact filtering thresholds for EEG data quality control - Updated with empirical data from meditation.csv",
+  "changelog": {
+    "v6": "Added contact quality and motion thresholds based on meditation.csv analysis",
+    "v5": "Original signal processing thresholds"
+  },
   "thresholds": {
     "multiband_spike": {
       "value": 90,
@@ -26,6 +30,23 @@
       "value": 3,
       "description": "Number of bands spiking to trigger artifact detection",
       "unit": "count"
+    },
+    "contact_quality": {
+      "good_max": 9.52,
+      "warning_max": 9.64,
+      "description": "Contact quality thresholds based on meditation.csv analysis (TP9: 9.30, AF7: 9.55, AF8: 9.81, TP10: 8.99 at p95)",
+      "unit": "optics_value",
+      "source": "Empirical analysis of 4566 samples from meditation.csv"
+    },
+    "motion": {
+      "threshold": 1.0106,
+      "robust_threshold": 1.0168,
+      "p95_threshold": 1.0036,
+      "p99_threshold": 1.0085,
+      "description": "Motion artifact thresholds based on accelerometer magnitude analysis",
+      "unit": "g_magnitude",
+      "source": "Empirical analysis of 3799 samples from meditation.csv (mean: 0.998 ± 0.004)",
+      "recommended": "Use p99_threshold (1.0085) for meditation sessions, robust_threshold (1.0168) for active use"
     }
   }
 }

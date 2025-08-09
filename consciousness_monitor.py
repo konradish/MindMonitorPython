@@ -39,6 +39,14 @@ import sys
 from collections import deque
 from scipy.stats import linregress
 
+# Anxiety-Regulation Cycle Detection
+try:
+    from anxiety_cycle_detector import AnxietyCycleDetector, CyclePhase
+    CYCLE_DETECTION_AVAILABLE = True
+except ImportError:
+    print("⚠️ Anxiety cycle detection not available - install anxiety_cycle_detector.py")
+    CYCLE_DETECTION_AVAILABLE = False
+
 class EnhancedConsciousnessMonitor:
     def __init__(self, csv_file="mind_monitor_complete.csv", window_seconds=0.75, 
                  update_interval=1.0, show_bands=True, show_insights=True, 
@@ -47,7 +55,7 @@ class EnhancedConsciousnessMonitor:
                  tune_rules=None, load_rules=None, macro_window=60.0, 
                  dual_mode=False, macro_only=False, trend_analysis=False, 
                  macro_update=None, anxiety_sensitivity=1.0, disable_meditation_exemption=False,
-                 beta_trend_window=5):
+                 beta_trend_window=5, sample_rate=None, cycle_detection=False):
         
         self.csv_file = csv_file
         self.window_seconds = window_seconds
@@ -73,8 +81,12 @@ class EnhancedConsciousnessMonitor:
         self.disable_meditation_exemption = disable_meditation_exemption
         self.beta_trend_window = beta_trend_window
         
-        # Auto-detect sample rate from data
-        self.sample_rate = self._detect_sample_rate()
+        # Use provided sample rate or auto-detect from data
+        if sample_rate is not None:
+            self.sample_rate = sample_rate
+            print(f"📊 Using override sample rate: {self.sample_rate}Hz")
+        else:
+            self.sample_rate = self._detect_sample_rate()
         self.window_samples = int(window_seconds * self.sample_rate)
         
         # Detect data format
@@ -95,12 +107,41 @@ class EnhancedConsciousnessMonitor:
         self.rel_band_columns = ['rel_delta', 'rel_theta', 'rel_alpha', 'rel_beta', 'rel_gamma']
         self.quality_columns = ['touching_forehead', 'horseshoe_tp9', 'horseshoe_af7', 'horseshoe_af8', 'horseshoe_tp10']
         
-        # Design filters once during initialization
+        # Design filters once during initialization (adapt to sample rate)
         self.highpass_filter = signal.butter(4, 0.5, btype='high', fs=self.sample_rate)
-        self.lowpass_filter = signal.butter(4, 50, btype='low', fs=self.sample_rate)
-        self.notch_filter = signal.iirnotch(60, 30, fs=self.sample_rate)
+        
+        # Adapt lowpass filter to sample rate (must be < Nyquist frequency)
+        nyquist = self.sample_rate / 2
+        lowpass_freq = min(40, nyquist * 0.9)  # Use 40Hz or 90% of Nyquist, whichever is lower
+        self.lowpass_filter = signal.butter(4, lowpass_freq, btype='low', fs=self.sample_rate)
+        
+        # Adapt notch filter to sample rate (skip if 60Hz > Nyquist)
+        if nyquist > 60:
+            self.notch_filter = signal.iirnotch(60, 30, fs=self.sample_rate)
+        else:
+            self.notch_filter = None  # Skip notch filter for low sample rates
+            
+        print(f"🔧 Filters: Highpass=0.5Hz, Lowpass={lowpass_freq:.1f}Hz, Notch={'60Hz' if self.notch_filter else 'disabled'}")
         
         self.last_file_size = 0
+
+        # Initialize anxiety-regulation cycle detector
+        if CYCLE_DETECTION_AVAILABLE and konrad_mode and cycle_detection:
+            self.cycle_detector = AnxietyCycleDetector(
+                baseline_anxiety=19.0,      # From training data analysis
+                concern_threshold=19.37,
+                escalation_threshold=19.73,
+                peak_threshold=20.10,
+                crisis_threshold=19.58,
+                recovery_alpha_min=5.0,     # Minimum alpha for recovery detection
+                window_seconds=30.0,        # 30-second analysis windows
+                memory_minutes=60.0         # 1-hour memory
+            )
+            print("🔄 Anxiety-regulation cycle detection: ENABLED")
+            self.cycle_tracking_enabled = True
+        else:
+            self.cycle_detector = None
+            self.cycle_tracking_enabled = False
         
         # Session tracking for smart output
         self.session_start = time.time()
@@ -1258,6 +1299,7 @@ class EnhancedConsciousnessMonitor:
         """Load detection rules from external file"""
         try:
             import json
+
             with open(filename, 'r') as f:
                 loaded_rules = json.load(f)
             self.DETECTION_RULES.update(loaded_rules)
@@ -1375,12 +1417,14 @@ class EnhancedConsciousnessMonitor:
                 
                 output_line = f"[{timestamp_str}] {band_str} | {fnirs_str} | {color}{state}{reset_color} | {emoji}"
                 
-                # Show optical data if available
+                # Show optical data if available and meaningful
                 if self.show_optics and interpretation.get('optics'):
                     optics = interpretation['optics']
                     if optics:
                         activations = [f"{ch}:{data.get('activation', 'none')}" for ch, data in list(optics.items())[:2]]
-                        output_line += f" | Optics: {' '.join(activations)}"
+                        # Only show if at least one activation is not 'none'
+                        if any('none' not in activation for activation in activations):
+                            output_line += f" | Optics: {' '.join(activations)}"
                 
                 print(output_line)
                 
@@ -1394,6 +1438,18 @@ class EnhancedConsciousnessMonitor:
                 if self.show_insights and interpretation.get('insights'):
                     for insight in interpretation['insights'][:2]:  # Limit to 2 insights for compactness
                         print(f"         {insight}")
+                
+                # Process anxiety-regulation cycles
+                if self.cycle_tracking_enabled:
+                    cycle_status = self.process_cycle_detection(
+                        band_powers=ratios,
+                        consciousness_state=state
+                    )
+                    
+                    if cycle_status:
+                        cycle_messages = self.format_cycle_status(cycle_status)
+                        for msg in cycle_messages:
+                            print(f"         {msg}")
                 
                 # Track for session summary
                 self._track_session_event(current_time, output_line, state, ratios)
@@ -2451,11 +2507,81 @@ class EnhancedConsciousnessMonitor:
         
         return details
 
+
+    def process_cycle_detection(self, band_powers, consciousness_state, timestamp=None):
+        """Process anxiety-regulation cycle detection"""
+        
+        if not self.cycle_tracking_enabled or self.cycle_detector is None:
+            return None
+        
+        try:
+            # Convert band percentages to dict format expected by cycle detector
+            cycle_status = self.cycle_detector.process_update(band_powers, timestamp)
+            
+            # Add consciousness state context
+            cycle_status['consciousness_state'] = consciousness_state
+            
+            return cycle_status
+            
+        except Exception as e:
+            print(f"⚠️ Error in cycle detection: {e}")
+            return None
+    
+    def format_cycle_status(self, cycle_status):
+        """Format cycle status for display"""
+        
+        if cycle_status is None:
+            return []
+        
+        messages = []
+        
+        # Current cycle phase
+        phase = cycle_status['current_phase']
+        anxiety_idx = cycle_status['anxiety_index']
+        trend = cycle_status['trend']
+        
+        phase_emojis = {
+            'baseline': '😌',
+            'initiation': '⚠️',
+            'escalation': '📈',
+            'peak': '🔥',
+            'recovery': '🌱',
+            'regulation': '✅'
+        }
+        
+        emoji = phase_emojis.get(phase, '🧠')
+        
+        messages.append(f"🔄 Cycle: {phase.upper()} {emoji} | Anxiety: {anxiety_idx:.2f} ({trend})")
+        
+        # Active cycles
+        if cycle_status['active_cycles'] > 0:
+            messages.append(f"   Active cycles: {cycle_status['active_cycles']}")
+        
+        # Show any cycle events
+        for message in cycle_status.get('messages', []):
+            messages.append(f"   {message}")
+        
+        # Threshold context
+        thresholds = cycle_status['thresholds']
+        if anxiety_idx >= thresholds['crisis']:
+            messages.append("   ⚠️ CRISIS LEVEL - Consider intervention")
+        elif anxiety_idx >= thresholds['peak']:
+            messages.append("   🔥 Peak activation detected")
+        elif anxiety_idx >= thresholds['escalation']:
+            messages.append("   📈 Anxiety escalation in progress")
+        elif anxiety_idx >= thresholds['concern']:
+            messages.append("   ⚠️ Elevated anxiety detected")
+        else:
+            messages.append("   😌 Within normal range")
+        
+        return messages
 def main():
     parser = argparse.ArgumentParser(description="Enhanced Consciousness Monitor v4 - Therapeutic Edition: EEG + fNIRS + Therapeutic Pattern Detection")
     parser.add_argument("--file", "-f", help="CSV file to monitor or analyze", default="mind_monitor_complete.csv")
     parser.add_argument("--window", "-w", type=float, default=0.75, help="Analysis window in seconds (default: 0.75)")
     parser.add_argument("--update", "-u", type=float, default=1.0, help="Update interval in seconds (default: 1.0)")
+    parser.add_argument("--sample-rate", type=float, help="Override sample rate (Hz) - use 88 for meditation.csv format")
+    parser.add_argument("--cycle-detection", action="store_true", help="Enable anxiety-regulation cycle detection (requires --konrad-mode)")
     parser.add_argument("--analyze", "-a", action="store_true", help="Analyze entire file instead of real-time monitoring")
     parser.add_argument("--no-bands", action="store_true", help="Hide EEG band power visualization")
     parser.add_argument("--no-insights", action="store_true", help="Hide psychological insights")
@@ -2516,7 +2642,9 @@ def main():
         macro_update=args.macro_update,
         anxiety_sensitivity=args.anxiety_sensitivity,
         disable_meditation_exemption=args.disable_meditation_exemption,
-        beta_trend_window=args.beta_trend_window
+        beta_trend_window=args.beta_trend_window,
+        sample_rate=args.sample_rate,
+        cycle_detection=args.cycle_detection
     )
     
     if args.analyze:

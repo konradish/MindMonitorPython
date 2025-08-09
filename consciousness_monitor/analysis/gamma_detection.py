@@ -137,17 +137,20 @@ def detect_gamma_bursts(gamma_envelope: np.ndarray, baseline_window: int = 512,
         start_idx = 0
         end_idx = len(gamma_envelope)
     
-    for i in range(start_idx, end_idx):
+    i = start_idx
+    while i < end_idx:
         # Define baseline window around current sample
         start_baseline = max(0, i - half_window)
         end_baseline = min(len(gamma_envelope), i + half_window)
         
         if end_baseline - start_baseline < baseline_window // 4:
+            i += 1
             continue  # Skip if we don't have enough baseline data
             
         baseline_power = np.median(gamma_envelope[start_baseline:end_baseline])
         
         if baseline_power <= 0:
+            i += 1
             continue  # Skip if baseline is zero or negative
             
         current_power = gamma_envelope[i]
@@ -218,7 +221,11 @@ def detect_gamma_bursts(gamma_envelope: np.ndarray, baseline_window: int = 512,
                     bursts.append((burst_start, burst_end, peak_db))
                     
                 # Skip ahead to avoid detecting overlapping bursts
-                i = burst_end
+                i = burst_end + 1
+            else:
+                i += 1
+        else:
+            i += 1
     
     return bursts
 

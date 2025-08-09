@@ -68,8 +68,20 @@ class DataParser:
                 try:
                     df = pd.read_csv(csv_file, nrows=5000, on_bad_lines='skip')
                 except:
-                    print("📊 Could not parse CSV for sample rate detection, using default")
-                    return self.settings.get_default_sample_rate()
+                    # Handle variable-width CSV by reading line by line
+                    try:
+                        rows = []
+                        with open(csv_file, 'r') as f:
+                            for i, line in enumerate(f):
+                                if i >= 5000:  # Limit for speed
+                                    break
+                                parts = line.strip().split(', ')
+                                rows.append(parts)
+                        df = pd.DataFrame(rows)
+                        print(f"📊 Parsed variable-width CSV: {len(df)} rows")
+                    except Exception as e:
+                        print(f"📊 Could not parse CSV for sample rate detection ({e}), using default")
+                        return self.settings.get_default_sample_rate()
             
             if df is not None and len(df) > 0:
                 # Try different timestamp column names
@@ -79,24 +91,40 @@ class DataParser:
                         timestamp_col = col
                         break
                 
-                if timestamp_col and len(df) > 100:
-                    # Parse timestamps and calculate effective sample rate
-                    timestamps = pd.to_datetime(df[timestamp_col], errors='coerce').dropna()
-                    if len(timestamps) > 100:
-                        total_duration = (timestamps.iloc[-1] - timestamps.iloc[0]).total_seconds()
-                        if total_duration > 0:
-                            effective_rate = len(timestamps) / total_duration
-                            
-                            # Cap at reasonable EEG rates
-                            if effective_rate > 512:
-                                print(f"📊 Detected bursted data ({effective_rate:.0f}Hz), using standard 256Hz")
-                                return 256
-                            elif effective_rate > 128:
-                                print(f"📊 Detected effective rate: {effective_rate:.1f}Hz")
-                                return effective_rate
-                            else:
-                                print(f"📊 Low rate detected ({effective_rate:.1f}Hz), using 256Hz default")
-                                return 256
+                # If no named timestamp column, assume first column is timestamp
+                if timestamp_col is None and len(df.columns) > 0:
+                    timestamp_col = 0  # Use first column as timestamp
+                
+                if timestamp_col is not None and len(df) > 100:
+                    # Filter for EEG data only to get true sample rate
+                    eeg_data = df[df.iloc[:, 1] == '/muse/eeg'] if len(df.columns) > 1 else df
+                    
+                    if len(eeg_data) > 100:
+                        # Parse EEG timestamps and get unique values
+                        if isinstance(timestamp_col, int):
+                            timestamps = pd.to_numeric(eeg_data.iloc[:, timestamp_col], errors='coerce').dropna()
+                        else:
+                            timestamps = pd.to_numeric(eeg_data[timestamp_col], errors='coerce').dropna()
+                        unique_timestamps = timestamps.drop_duplicates().sort_values()
+                        
+                        if len(unique_timestamps) > 50:
+                            total_duration = unique_timestamps.iloc[-1] - unique_timestamps.iloc[0]
+                            if total_duration > 0:
+                                effective_rate = len(unique_timestamps) / total_duration
+                                
+                                print(f"📊 EEG samples: {len(timestamps)}, unique timestamps: {len(unique_timestamps)}")
+                                print(f"📊 Duration: {total_duration:.2f}s, effective rate: {effective_rate:.1f}Hz")
+                                
+                                # Cap at reasonable EEG rates
+                                if effective_rate > 512:
+                                    print(f"📊 Very high rate detected ({effective_rate:.0f}Hz), using 256Hz")
+                                    return 256
+                                elif effective_rate > 50:  # Accept rates down to 50Hz
+                                    print(f"📊 Detected sample rate: {effective_rate:.1f}Hz")
+                                    return effective_rate
+                                else:
+                                    print(f"📊 Very low rate detected ({effective_rate:.1f}Hz), using 256Hz default")
+                                    return 256
         except Exception as e:
             print(f"⚠️ Could not detect sample rate: {e}")
         

@@ -25,8 +25,18 @@ class SignalProcessor:
         """Setup commonly used filters."""
         try:
             self.highpass_filter = signal.butter(4, 0.5, btype='high', fs=self.sample_rate)
-            self.lowpass_filter = signal.butter(4, 50, btype='low', fs=self.sample_rate)
-            self.notch_filter = signal.iirnotch(60, 30, fs=self.sample_rate)
+            
+            # Adapt lowpass filter to sample rate (must be < Nyquist frequency)
+            nyquist = self.sample_rate / 2
+            lowpass_freq = min(40, nyquist * 0.9)  # Use 40Hz or 90% of Nyquist, whichever is lower
+            self.lowpass_filter = signal.butter(4, lowpass_freq, btype='low', fs=self.sample_rate)
+            
+            # Adapt notch filter to sample rate (skip if 60Hz > Nyquist)
+            if nyquist > 60:
+                self.notch_filter = signal.iirnotch(60, 30, fs=self.sample_rate)
+            else:
+                self.notch_filter = None  # Skip notch filter for low sample rates
+                
         except Exception as e:
             print(f"⚠️ Warning: Could not setup filters: {e}")
             self.highpass_filter = None

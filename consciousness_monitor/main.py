@@ -195,7 +195,7 @@ class EnhancedConsciousnessMonitor:
                 print(f"Main - Channels extracted: {len(channels) if channels else 0}")
             
             if not channels:
-                return self._get_no_signal_result(timestamp)
+                return self._get_error_result(timestamp)
             
             # Calculate band powers using signal processor
             if self.debug:
@@ -242,7 +242,7 @@ class EnhancedConsciousnessMonitor:
         except Exception as e:
             if self.debug:
                 self.display_manager.display_error(f"Analysis failed: {e}")
-            return self._get_no_signal_result()
+            return self._get_error_result()
     
     def _extract_mind_monitor_channels(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Extract EEG channels from Mind Monitor format data."""
@@ -429,7 +429,7 @@ class EnhancedConsciousnessMonitor:
         except Exception as e:
             if self.debug:
                 self.display_manager.display_error(f"Precomputed analysis failed: {e}")
-            return self._get_no_signal_result()
+            return self._get_error_result()
     
     def _extract_optics_from_df(self, df) -> Optional[Dict[str, float]]:
         """Extract optics data from DataFrame."""
@@ -519,8 +519,8 @@ class EnhancedConsciousnessMonitor:
         # Send window data
         self.sink.on_windows([window_data])
         
-        # Send detection if it's a significant state
-        if result.state != "NO_SIGNAL" and result.state != "BASELINE":
+        # Send detection if it's a significant state (skip errors and baseline)
+        if result.state not in ("ERROR", "BASELINE"):
             self.sink.on_detection(
                 session_id=self.session_id,
                 start=timestamp.isoformat(),
@@ -531,13 +531,13 @@ class EnhancedConsciousnessMonitor:
                 extra={'emoji': result.emoji, 'insights': result.insights}
             )
     
-    def _get_no_signal_result(self, timestamp=None) -> AnalysisResult:
-        """Create a no-signal result."""
+    def _get_error_result(self, timestamp=None) -> AnalysisResult:
+        """Create an error result for missing channels or exceptions."""
         return AnalysisResult(
             timestamp=timestamp or datetime.now(),
-            state="NO_SIGNAL",
-            emoji="❓",
-            insights=["No clear signal detected"],
+            state="ERROR",
+            emoji="⚠️",
+            insights=["Analysis error - no channel data"],
             band_percentages={band: 0.0 for band in ['delta', 'theta', 'alpha', 'beta', 'gamma']}
         )
     

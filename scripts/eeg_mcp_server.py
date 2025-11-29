@@ -69,7 +69,8 @@ def interpret_state(state: str, alpha: float, beta: float, delta: float, theta: 
         "JHANA": "User is in deep meditative absorption. Minimize interruption.",
         "SECURITY_GUARD": "User's nervous system detected a threat pattern. Be calming.",
         "RECOVERY": "User is recovering from an alert state. Give space.",
-        "NO_SIGNAL": "EEG signal unclear - possible movement or poor electrode contact.",
+        "MIXED": "User in transitional state - no dominant pattern. Brain activity present but ambiguous.",
+        "ERROR": "EEG signal error - possible movement or poor electrode contact.",
     }
 
     # Cognitive load estimation
@@ -302,18 +303,74 @@ def get_eeg_history(minutes: int = 5) -> dict:
         }
 
 
+def _compute_band_stats(rows: list) -> dict:
+    """Compute statistics for each band from a list of rows."""
+    import statistics
+
+    bands = ['alpha', 'beta', 'delta', 'theta', 'gamma']
+    stats = {}
+
+    for band in bands:
+        key = f'{band}_rel'
+        values = [float(r[key] or 0) for r in rows]
+        if values:
+            stats[band] = {
+                "mean": round(statistics.mean(values), 1),
+                "std": round(statistics.stdev(values), 1) if len(values) > 1 else 0,
+                "min": round(min(values), 1),
+                "max": round(max(values), 1)
+            }
+        else:
+            stats[band] = {"mean": 0, "std": 0, "min": 0, "max": 0}
+
+    return stats
+
+
+def _find_longest_state(rows: list) -> dict:
+    """Find the longest continuous state period."""
+    if not rows:
+        return None
+
+    longest = {"state": None, "duration_sec": 0}
+    current_state = rows[0]['state']
+    current_start = rows[0]['ts_start']
+
+    for row in rows[1:]:
+        if row['state'] != current_state:
+            duration = (row['ts_start'] - current_start).total_seconds()
+            if duration > longest['duration_sec']:
+                longest = {"state": current_state, "duration_sec": round(duration, 1)}
+            current_state = row['state']
+            current_start = row['ts_start']
+
+    # Check final segment
+    if rows:
+        duration = (rows[-1]['ts_start'] - current_start).total_seconds()
+        if duration > longest['duration_sec']:
+            longest = {"state": current_state, "duration_sec": round(duration, 1)}
+
+    return longest if longest['state'] else None
+
+
 @mcp.tool()
-def get_band_timeseries(minutes: int = 5) -> dict:
+def get_band_timeseries(minutes: int = 5, detail: str = "summary") -> dict:
     """
-    Get raw band power percentages over time.
+    Get band power data over time with configurable detail level.
 
     Args:
         minutes: How many minutes of data to retrieve (default: 5, max: 60)
+        detail: Level of detail - "summary" (default), "csv", or "json"
+            - summary: Statistics per band, state distribution, longest state
+            - csv: Raw data as compact CSV string (timestamp,alpha,beta,delta,theta,gamma,state)
+            - json: Full JSON array of all readings (highest token usage)
 
-    Returns timestamped band power readings for seeing the SHAPE of transitions.
-    Each data point contains alpha, beta, delta, theta, gamma percentages.
+    Returns summary statistics by default. Use csv/json only when you need
+    to see the exact shape of transitions over time.
     """
     minutes = min(max(1, minutes), 60)
+    detail = detail.lower() if detail else "summary"
+    if detail not in ("summary", "csv", "json"):
+        detail = "summary"
 
     try:
         conn = get_db_connection()
@@ -342,25 +399,81 @@ def get_band_timeseries(minutes: int = 5) -> dict:
                 "message": f"No EEG data in the last {minutes} minutes"
             }
 
-        timeseries = [
-            {
-                "timestamp": to_chicago(r['ts_start']),
-                "alpha": round(float(r['alpha_rel'] or 0), 1),
-                "beta": round(float(r['beta_rel'] or 0), 1),
-                "delta": round(float(r['delta_rel'] or 0), 1),
-                "theta": round(float(r['theta_rel'] or 0), 1),
-                "gamma": round(float(r['gamma_rel'] or 0), 1),
-                "state": r['state']
-            }
-            for r in rows
-        ]
-
-        return {
-            "status": "ok",
-            "period_minutes": minutes,
-            "data_points": len(timeseries),
-            "timeseries": timeseries
+        # Count state distribution
+        state_counts = {}
+        for r in rows:
+            state = r['state'] or 'UNKNOWN'
+            state_counts[state] = state_counts.get(state, 0) + 1
+        total = len(rows)
+        state_distribution = {
+            s: round(c / total, 2) for s, c in
+            sorted(state_counts.items(), key=lambda x: -x[1])
         }
+
+        # Count transitions
+        transitions = sum(1 for i in range(1, len(rows)) if rows[i]['state'] != rows[i-1]['state'])
+
+        base_response = {
+            "status": "ok",
+            "period": {
+                "start": to_chicago(rows[0]['ts_start']),
+                "end": to_chicago(rows[-1]['ts_start']),
+                "duration_sec": round((rows[-1]['ts_start'] - rows[0]['ts_start']).total_seconds(), 1)
+            },
+            "readings_count": len(rows),
+            "transitions": transitions,
+            "state_distribution": state_distribution,
+        }
+
+        if detail == "summary":
+            # Compute statistics - most compact and useful
+            band_stats = _compute_band_stats(rows)
+            longest_state = _find_longest_state(rows)
+
+            return {
+                **base_response,
+                "band_stats": band_stats,
+                "longest_state": longest_state
+            }
+
+        elif detail == "csv":
+            # CSV format - ~40-50% fewer tokens than JSON
+            lines = ["timestamp,alpha,beta,delta,theta,gamma,state"]
+            for r in rows:
+                lines.append(
+                    f"{to_chicago(r['ts_start'])},"
+                    f"{round(float(r['alpha_rel'] or 0), 1)},"
+                    f"{round(float(r['beta_rel'] or 0), 1)},"
+                    f"{round(float(r['delta_rel'] or 0), 1)},"
+                    f"{round(float(r['theta_rel'] or 0), 1)},"
+                    f"{round(float(r['gamma_rel'] or 0), 1)},"
+                    f"{r['state'] or 'UNKNOWN'}"
+                )
+            return {
+                **base_response,
+                "format": "csv",
+                "data": "\n".join(lines)
+            }
+
+        else:  # json
+            # Full JSON - most tokens but most parseable
+            timeseries = [
+                {
+                    "timestamp": to_chicago(r['ts_start']),
+                    "alpha": round(float(r['alpha_rel'] or 0), 1),
+                    "beta": round(float(r['beta_rel'] or 0), 1),
+                    "delta": round(float(r['delta_rel'] or 0), 1),
+                    "theta": round(float(r['theta_rel'] or 0), 1),
+                    "gamma": round(float(r['gamma_rel'] or 0), 1),
+                    "state": r['state']
+                }
+                for r in rows
+            ]
+            return {
+                **base_response,
+                "format": "json",
+                "timeseries": timeseries
+            }
 
     except Exception as e:
         return {
@@ -1034,11 +1147,17 @@ def test_tools():
     result = get_session_summary()
     print(json.dumps(result, indent=2, default=str))
 
-    print("\n4. get_band_timeseries(minutes=2):")
+    print("\n4. get_band_timeseries(minutes=2) - summary (default):")
     result = get_band_timeseries(2)
-    # Truncate timeseries for display
-    if result.get('timeseries'):
-        result['timeseries'] = result['timeseries'][:5] + ['...truncated...'] if len(result['timeseries']) > 5 else result['timeseries']
+    print(json.dumps(result, indent=2, default=str))
+
+    print("\n4b. get_band_timeseries(minutes=2, detail='csv'):")
+    result = get_band_timeseries(2, detail='csv')
+    # Truncate CSV for display
+    if result.get('data'):
+        lines = result['data'].split('\n')
+        if len(lines) > 6:
+            result['data'] = '\n'.join(lines[:6]) + f'\n... ({len(lines)-6} more rows)'
     print(json.dumps(result, indent=2, default=str))
 
     print("\n5. get_transition_analysis(minutes=10):")

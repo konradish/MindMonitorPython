@@ -128,7 +128,7 @@ class DetectionEngine:
             if self.debug:
                 import traceback
                 traceback.print_exc()
-            return self._get_no_signal_result(timestamp)
+            return self._get_error_result(timestamp)
     
     def _update_db_tracking(self, band_powers: Dict[str, float]):
         """Update dB value tracking for change detection."""
@@ -184,8 +184,8 @@ class DetectionEngine:
             elif self.debug:
                 print(f"Debug - Rule {rule_name} failed")
         
-        # Default fallback
-        return "NO_SIGNAL", {"emoji": "❓", "insights": ["No clear pattern detected"]}
+        # Default fallback - valid signal but no pattern match
+        return "MIXED", {"emoji": "🔀", "insights": ["Mixed state - no dominant pattern"]}
     
     def _test_rule_conditions(self, rule_name: str, rule: Dict[str, Any], 
                             bands: Dict[str, float], db_changes: Dict[str, float]) -> bool:
@@ -351,13 +351,13 @@ class DetectionEngine:
         
         return True
     
-    def _get_no_signal_result(self, timestamp=None) -> AnalysisResult:
-        """Create a no-signal result for error cases."""
+    def _get_error_result(self, timestamp=None) -> AnalysisResult:
+        """Create an error result for exception cases."""
         return AnalysisResult(
             timestamp=timestamp,
-            state="NO_SIGNAL",
-            emoji="❓",
-            insights=["No clear signal detected"],
+            state="ERROR",
+            emoji="⚠️",
+            insights=["Analysis error - check signal quality"],
             band_percentages={band: 0.0 for band in ['delta', 'theta', 'alpha', 'beta', 'gamma']},
             db_changes={band: 0.0 for band in ['delta', 'theta', 'alpha', 'beta', 'gamma']}
         )

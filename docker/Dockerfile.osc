@@ -1,7 +1,12 @@
 FROM python:3.11-slim
 
-# Install python-osc
-RUN pip install --no-cache-dir python-osc
+# Install dependencies for OSC receiver with database integration
+RUN pip install --no-cache-dir \
+    python-osc \
+    numpy \
+    scipy \
+    pandas \
+    psycopg2-binary
 
 WORKDIR /app
 

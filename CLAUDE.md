@@ -138,7 +138,79 @@ docker compose -f docker/docker-compose.osc.yml up -d
 docker compose -f docker/docker-compose.osc.yml logs -f
 ```
 
-For WSL without Docker, see manual port forwarding instructions in docs/.
+For WSL without Docker, see the WSL2 UDP Workaround section below.
+
+## WSL2 UDP Workaround (Real-time Streaming to Database)
+
+WSL2 has a NAT network that doesn't forward UDP packets from the Windows host. This requires a workaround to get Mind Monitor data into WSL.
+
+### Architecture
+```
+Phone (Mind Monitor) → Windows IP:5000 (UDP) → UDP Forwarder → WSL IP:5000 → OSC Receiver → TimescaleDB
+```
+
+### Step 1: Start the Database
+```bash
+docker compose -f docker/compose.yml up -d db
+```
+
+### Step 2: Start the UDP Forwarder on Windows
+Open PowerShell (as regular user) and run:
+```powershell
+cd C:\projects\MindMonitorPython
+python scripts/udp_forward_to_wsl.py
+```
+This listens on Windows UDP 5000 and forwards to WSL.
+
+### Step 3: Start the OSC Receiver in WSL
+```bash
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" uv run python scripts/osc_receiver.py
+```
+
+### Step 4: Configure Mind Monitor
+- **IP Address:** Your Windows IP (find with `ipconfig` - usually 192.168.x.x)
+- **Port:** 5000
+
+Database recording starts automatically on first EEG packet (no Marker 1 needed).
+
+### Band Power Source Hierarchy
+The OSC receiver uses band powers in this priority order:
+1. **`/muse/elements/*_relative`** (if "Relative Brain Waves" enabled in Mind Monitor)
+2. **`/muse/elements/*_absolute`** (always available, converted from log-scale dB to %)
+3. **Raw FFT** (fallback, computed from `/muse/eeg` samples)
+
+### Verifying Data Flow
+```bash
+# Check if receiver is getting data (should show "EEG data received!")
+# Check database for new records
+docker compose -f docker/compose.yml exec db \
+  psql -U eeg -d eeg -c "SELECT COUNT(*), MAX(ts_start) AT TIME ZONE 'America/Chicago' FROM eeg_window;"
+```
+
+### Why This Workaround?
+- WSL2 uses a virtual network with NAT
+- `netsh portproxy` only works for TCP, not UDP
+- Mind Monitor sends OSC over UDP
+- The Python UDP forwarder bridges Windows → WSL
+
+### Firewall Note
+A Windows Firewall rule "Mind Monitor OSC (UDP 5000)" should already exist. If not:
+```powershell
+# Run as Administrator
+New-NetFirewallRule -DisplayName "Mind Monitor OSC (UDP 5000)" -Direction Inbound -Protocol UDP -LocalPort 5000 -Action Allow
+```
+
+### Quick Restart After Reboot
+```bash
+# Terminal 1 (PowerShell on Windows):
+cd C:\projects\MindMonitorPython && python scripts/udp_forward_to_wsl.py
+
+# Terminal 2 (WSL):
+docker compose -f docker/compose.yml up -d db
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" uv run python scripts/osc_receiver.py
+
+# Database recording starts automatically when EEG data arrives
+```
 
 ## Database Integration (TimescaleDB)
 

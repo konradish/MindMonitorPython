@@ -107,6 +107,27 @@ uv run python -m consciousness_monitor --window 1.0 --update 2
 **Standard Patterns:**
 - RELAXED, FOCUSED, CREATIVE/FLOW, MEDITATIVE, DROWSY, PEAK FOCUS, ALERT/TENSE
 
+## Real-time Database Streaming
+
+Stream EEG data directly to TimescaleDB as you wear the headband.
+
+### Quick Start (WSL)
+
+```bash
+# Terminal 1 (PowerShell on Windows):
+cd C:\projects\MindMonitorPython && python scripts/udp_forward_to_wsl.py
+
+# Terminal 2 (WSL):
+docker compose -f docker/compose.yml up -d db
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" uv run python scripts/osc_receiver.py
+```
+
+Configure Mind Monitor to send to your Windows IP on port 5000. Database recording starts automatically on first EEG packet (no Marker 1 needed).
+
+### Band Power Source
+
+The OSC receiver uses Mind Monitor's pre-computed absolute band powers (`/muse/elements/*_absolute`), converting them from log-scale dB to relative percentages. This is more accurate than computing FFT from raw samples.
+
 ## Database Integration (TimescaleDB)
 
 Store EEG analysis windows and detections in TimescaleDB for later analysis.
@@ -122,7 +143,7 @@ SESSION_ID=$(uuidgen)
 echo "Session ID: $SESSION_ID"
 ```
 
-### Run with Database Logging
+### Run with Database Logging (from CSV)
 
 The monitor auto-detects OSC receiver format and switches to raw signal processing.
 

@@ -8,5 +8,10 @@ services:
       - "5000:5000/udp"
     volumes:
       - ..:/app
+    environment:
+      - DATABASE_URL=postgresql://eeg:eegpass@host.docker.internal:5590/eeg
+      - TZ=America/Chicago
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     network_mode: bridge

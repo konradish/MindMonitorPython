@@ -61,6 +61,19 @@ CREATE TABLE IF NOT EXISTS metrics (
   dims JSONB DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS eeg_baseline (
+  name TEXT PRIMARY KEY,
+  alpha_rel REAL NOT NULL,
+  beta_rel REAL NOT NULL,
+  theta_rel REAL NOT NULL,
+  delta_rel REAL NOT NULL,
+  gamma_rel REAL NOT NULL,
+  samples INT NOT NULL,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS eeg_window_1s
 WITH (timescaledb.continuous) AS
 SELECT session_id,

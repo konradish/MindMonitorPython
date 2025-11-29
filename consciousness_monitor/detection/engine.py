@@ -1,6 +1,7 @@
 """Core detection engine for EEG pattern matching."""
 
 from typing import Dict, List, Optional, Any, Tuple
+import os
 import numpy as np
 from collections import deque
 
@@ -11,36 +12,53 @@ from ..utils.math_helpers import MathHelpers
 from .artifacts import ArtifactFilter
 from .sub_states import SubStateDetector
 
+# Optional database support for custom state definitions
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
+
 
 class DetectionEngine:
     """Main engine for detecting consciousness states from EEG data."""
     
-    def __init__(self, 
+    def __init__(self,
                  rule_manager: Optional[RuleManager] = None,
                  artifact_thresholds: Optional[ArtifactThresholds] = None,
                  debug: bool = False,
-                 konrad_mode: bool = False):
-        
+                 konrad_mode: bool = False,
+                 database_url: Optional[str] = None):
+
         self.rule_manager = rule_manager or RuleManager()
         self.artifact_filter = ArtifactFilter(artifact_thresholds or ArtifactThresholds())
         self.sub_state_detector = SubStateDetector(self.rule_manager.get_sub_state_rules())
-        
+
         self.debug = debug
         self.konrad_mode = konrad_mode
-        
+
+        # Database connection for custom state definitions
+        self.database_url = database_url or os.environ.get('DATABASE_URL')
+        self._custom_states_cache = None
+        self._custom_states_cache_time = 0
+        self._cache_ttl_seconds = 30  # Refresh custom states every 30 seconds
+
         # State tracking
         self.last_state = None
         self.previous_db_values = {}
         self.current_db_values = {}
         self.db_changes = {}
-        
+
         # Beta trend analysis for anxiety detection
         self.beta_history = deque(maxlen=5)
-        
+
         # Gamma trend analysis for excitement detection
         self.gamma_history = deque(maxlen=5)
-        
-        print(f"🔍 Detection Engine initialized | Rules: {len(self.rule_manager.get_detection_rules())}")
+
+        # Load initial custom states count
+        custom_count = len(self._get_custom_states()) if self.database_url and HAS_PSYCOPG2 else 0
+        print(f"🔍 Detection Engine initialized | Rules: {len(self.rule_manager.get_detection_rules())} | Custom states: {custom_count}")
         if debug:
             print(f"🔍 Debug Mode: Rule testing enabled")
     
@@ -155,24 +173,135 @@ class DetectionEngine:
         """Update trend tracking for beta and gamma (centralized)."""
         beta_percent = float(percentages.get('beta', 0))
         gamma_percent = float(percentages.get('gamma', 0))
-        
+
         self.beta_history.append(beta_percent)
         self.gamma_history.append(gamma_percent)
-    
+
+    def _get_custom_states(self) -> List[Dict[str, Any]]:
+        """
+        Get custom state definitions from database with caching.
+
+        Returns list of enabled custom states sorted by priority (descending).
+        Caches results for _cache_ttl_seconds to avoid excessive DB queries.
+        """
+        import time
+
+        # Return empty if no database support
+        if not HAS_PSYCOPG2 or not self.database_url:
+            return []
+
+        # Check cache
+        now = time.time()
+        if self._custom_states_cache is not None and (now - self._custom_states_cache_time) < self._cache_ttl_seconds:
+            return self._custom_states_cache
+
+        try:
+            conn = psycopg2.connect(self.database_url)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            cur.execute("""
+                SELECT name, priority, conditions, interpretation, recommendations, emoji
+                FROM state_definition
+                WHERE enabled = true
+                ORDER BY priority DESC, name
+            """)
+
+            rows = cur.fetchall()
+            conn.close()
+
+            # Convert to list of dicts
+            self._custom_states_cache = [dict(r) for r in rows]
+            self._custom_states_cache_time = now
+
+            if self.debug and self._custom_states_cache:
+                print(f"Debug - Loaded {len(self._custom_states_cache)} custom states from database")
+
+            return self._custom_states_cache
+
+        except Exception as e:
+            if self.debug:
+                print(f"Debug - Failed to load custom states: {e}")
+            return []
+
+    def _evaluate_custom_state(self, state: Dict[str, Any], percentages: Dict[str, float]) -> bool:
+        """
+        Test if a custom state's conditions are met.
+
+        Args:
+            state: Custom state definition with 'conditions' dict
+            percentages: Current band power percentages
+
+        Returns:
+            True if all conditions are satisfied
+        """
+        conditions = state.get('conditions', {})
+        if not conditions:
+            return False
+
+        for key, threshold in conditions.items():
+            if key.endswith('_min'):
+                band = key.replace('_min', '')
+                if band in percentages and float(percentages[band]) < threshold:
+                    return False
+            elif key.endswith('_max'):
+                band = key.replace('_max', '')
+                if band in percentages and float(percentages[band]) > threshold:
+                    return False
+
+        return True
+
+    def _evaluate_database_rules(self, percentages: Dict[str, float]) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """
+        Evaluate custom database-defined state rules.
+
+        These are checked BEFORE hardcoded rules, allowing Claude-defined
+        personalized states to take priority.
+
+        Args:
+            percentages: Band power percentages
+
+        Returns:
+            Tuple of (state_name, rule_data) if a custom state matches, None otherwise
+        """
+        custom_states = self._get_custom_states()
+
+        for state in custom_states:
+            if self._evaluate_custom_state(state, percentages):
+                if self.debug:
+                    print(f"Debug - Custom state matched: {state['name']}")
+
+                rule_data = {
+                    'emoji': state.get('emoji', '🧠'),
+                    'insights': [state.get('interpretation', f"Custom state: {state['name']}")],
+                    'recommendations': state.get('recommendations', []),
+                    'source': 'database'
+                }
+                return state['name'], rule_data
+
+        return None
+
     def _evaluate_detection_rules(self, percentages: Dict[str, float], db_changes: Dict[str, float]) -> Tuple[str, Dict[str, Any]]:
         """
         Evaluate all detection rules to find the best match.
-        
+
+        Custom database-defined states are checked FIRST (higher priority),
+        then hardcoded rules from detection_rules.json.
+
         Args:
             percentages: Band power percentages
             db_changes: dB changes for each band
-            
+
         Returns:
             Tuple of (state_name, rule_data)
         """
-        # Get rules sorted by priority
+        # Check custom database-defined states FIRST
+        db_result = self._evaluate_database_rules(percentages)
+        if db_result:
+            return db_result
+
+        # Get hardcoded rules sorted by priority
         sorted_rules = self.rule_manager.get_sorted_rules()
-        
+
         for rule_name, rule in sorted_rules:
             if self.debug:
                 print(f"Debug - Testing rule: {rule_name}")

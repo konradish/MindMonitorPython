@@ -56,6 +56,53 @@ def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
 
+def check_custom_states(percentages: dict) -> tuple:
+    """
+    Check if current band powers match any custom state definition.
+
+    Returns (state_name, state_data) if match, (None, None) otherwise.
+    This enables dynamic state classification at read-time without
+    needing to restart the osc_receiver.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute("""
+            SELECT name, conditions, interpretation, recommendations, emoji
+            FROM state_definition
+            WHERE enabled = true
+            ORDER BY priority DESC, name
+        """)
+
+        states = cur.fetchall()
+        conn.close()
+
+        for state in states:
+            conditions = state['conditions'] or {}
+            match = True
+
+            for key, threshold in conditions.items():
+                if key.endswith('_min'):
+                    band = key.replace('_min', '')
+                    if band in percentages and percentages[band] < threshold:
+                        match = False
+                        break
+                elif key.endswith('_max'):
+                    band = key.replace('_max', '')
+                    if band in percentages and percentages[band] > threshold:
+                        match = False
+                        break
+
+            if match:
+                return state['name'], state
+
+        return None, None
+
+    except Exception:
+        return None, None
+
+
 def interpret_state(state: str, alpha: float, beta: float, delta: float, theta: float) -> dict:
     """Provide interpretation of the EEG state for Claude."""
     interpretations = {
@@ -169,21 +216,54 @@ def get_current_eeg_state() -> dict:
             ts = ts.replace(tzinfo=timezone.utc)
         age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
 
-        state = row['state'] or "UNKNOWN"
+        db_state = row['state'] or "UNKNOWN"
         alpha = float(row['alpha_rel'] or 0)
         beta = float(row['beta_rel'] or 0)
         delta = float(row['delta_rel'] or 0)
         theta = float(row['theta_rel'] or 0)
         gamma = float(row['gamma_rel'] or 0)
 
+        # Check custom states FIRST (dynamic, no restart needed)
+        percentages = {'alpha': alpha, 'beta': beta, 'delta': delta, 'theta': theta, 'gamma': gamma}
+        custom_state_name, custom_state_data = check_custom_states(percentages)
+
+        if custom_state_name:
+            # Use custom state
+            state = custom_state_name
+            custom_interpretation = custom_state_data.get('interpretation', f"Custom state: {state}")
+            custom_recommendations = custom_state_data.get('recommendations') or []
+
+            return {
+                "status": "ok",
+                "timestamp": to_chicago(ts),
+                "data_age_seconds": round(age_seconds, 1),
+                "is_fresh": age_seconds < 10,
+                "state": state,
+                "state_source": "custom",  # Indicates dynamic custom state
+                "band_powers": {
+                    "alpha": round(alpha, 1),
+                    "beta": round(beta, 1),
+                    "delta": round(delta, 1),
+                    "theta": round(theta, 1),
+                    "gamma": round(gamma, 1)
+                },
+                "interpretation": custom_interpretation,
+                "cognitive_load": "moderate",  # Could compute from beta
+                "relaxation_level": "moderate",  # Could compute from alpha
+                "recommendations": custom_recommendations
+            }
+
+        # Fall back to pre-computed state from DB
+        state = db_state
         interpretation = interpret_state(state, alpha, beta, delta, theta)
 
         return {
             "status": "ok",
             "timestamp": to_chicago(ts),
             "data_age_seconds": round(age_seconds, 1),
-            "is_fresh": age_seconds < 10,  # Data from last 10 seconds
+            "is_fresh": age_seconds < 10,
             "state": state,
+            "state_source": "hardcoded",  # Pre-computed by osc_receiver
             "band_powers": {
                 "alpha": round(alpha, 1),
                 "beta": round(beta, 1),
@@ -1128,6 +1208,392 @@ def get_session_summary() -> dict:
             "status": "error",
             "message": f"Failed to get session summary: {str(e)}"
         }
+
+
+# =============================================================================
+# State Definition Tools (Claude-managed custom states)
+# =============================================================================
+
+@mcp.tool()
+def create_state_definition(
+    name: str,
+    conditions: dict,
+    interpretation: str = "",
+    recommendations: list = None,
+    emoji: str = "🧠",
+    priority: int = 50,
+    notes: str = ""
+) -> dict:
+    """
+    Create a new custom EEG state definition.
+
+    Custom states are checked BEFORE hardcoded rules, allowing you to define
+    personalized patterns like "DEEP_WORK" or "K_RELAXED" with specific thresholds.
+
+    Args:
+        name: Unique name for this state (e.g., "DEEP_WORK", "CODING_FLOW")
+        conditions: Band power thresholds as dict with keys like:
+            - alpha_min, alpha_max (0-100)
+            - beta_min, beta_max (0-100)
+            - delta_min, delta_max (0-100)
+            - theta_min, theta_max (0-100)
+            - gamma_min, gamma_max (0-100)
+        interpretation: Human-readable explanation of this state
+        recommendations: List of communication recommendations
+        emoji: Display emoji (default: brain)
+        priority: Higher = checked first (default: 50, hardcoded rules are 1-20)
+        notes: Additional context about this state definition
+
+    Example conditions:
+        {"alpha_min": 25, "alpha_max": 40, "beta_min": 18, "beta_max": 30}
+    """
+    if not name or not conditions:
+        return {"status": "error", "message": "name and conditions are required"}
+
+    # Validate condition keys
+    valid_keys = {'alpha_min', 'alpha_max', 'beta_min', 'beta_max',
+                  'delta_min', 'delta_max', 'theta_min', 'theta_max',
+                  'gamma_min', 'gamma_max'}
+    invalid_keys = set(conditions.keys()) - valid_keys
+    if invalid_keys:
+        return {"status": "error", "message": f"Invalid condition keys: {invalid_keys}. Valid: {valid_keys}"}
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute("""
+            INSERT INTO state_definition
+                (name, priority, conditions, interpretation, recommendations, emoji, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (name) DO UPDATE SET
+                priority = EXCLUDED.priority,
+                conditions = EXCLUDED.conditions,
+                interpretation = EXCLUDED.interpretation,
+                recommendations = EXCLUDED.recommendations,
+                emoji = EXCLUDED.emoji,
+                notes = EXCLUDED.notes,
+                updated_at = now()
+            RETURNING created_at, updated_at
+        """, (
+            name.upper().replace(' ', '_'),
+            priority,
+            json.dumps(conditions),
+            interpretation or None,
+            recommendations or None,
+            emoji,
+            notes or None
+        ))
+
+        result = cur.fetchone()
+        conn.commit()
+        conn.close()
+
+        return {
+            "status": "ok",
+            "message": f"State definition '{name}' created/updated",
+            "name": name.upper().replace(' ', '_'),
+            "priority": priority,
+            "conditions": conditions,
+            "interpretation": interpretation,
+            "recommendations": recommendations,
+            "emoji": emoji,
+            "created_at": to_chicago(result['created_at']),
+            "updated_at": to_chicago(result['updated_at'])
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to create state definition: {str(e)}"}
+
+
+@mcp.tool()
+def list_state_definitions(include_disabled: bool = False) -> dict:
+    """
+    List all custom state definitions.
+
+    Args:
+        include_disabled: Whether to include disabled states (default: False)
+
+    Returns all custom states with their conditions, priorities, and metadata.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        if include_disabled:
+            cur.execute("""
+                SELECT * FROM state_definition
+                ORDER BY priority DESC, name
+            """)
+        else:
+            cur.execute("""
+                SELECT * FROM state_definition
+                WHERE enabled = true
+                ORDER BY priority DESC, name
+            """)
+
+        rows = cur.fetchall()
+        conn.close()
+
+        states = [
+            {
+                "name": r['name'],
+                "priority": r['priority'],
+                "conditions": r['conditions'],
+                "interpretation": r['interpretation'],
+                "recommendations": r['recommendations'],
+                "emoji": r['emoji'],
+                "enabled": r['enabled'],
+                "author": r['author'],
+                "notes": r['notes'],
+                "created_at": to_chicago(r['created_at']),
+                "updated_at": to_chicago(r['updated_at'])
+            }
+            for r in rows
+        ]
+
+        return {
+            "status": "ok",
+            "count": len(states),
+            "states": states,
+            "note": "Custom states are checked BEFORE hardcoded rules (priority 50 > hardcoded 1-20)"
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to list state definitions: {str(e)}"}
+
+
+@mcp.tool()
+def update_state_definition(
+    name: str,
+    conditions: dict = None,
+    interpretation: str = None,
+    recommendations: list = None,
+    emoji: str = None,
+    priority: int = None,
+    enabled: bool = None,
+    notes: str = None
+) -> dict:
+    """
+    Update an existing state definition.
+
+    Args:
+        name: Name of the state to update (required)
+        conditions: New band power thresholds (optional)
+        interpretation: New interpretation text (optional)
+        recommendations: New recommendations list (optional)
+        emoji: New emoji (optional)
+        priority: New priority (optional)
+        enabled: Enable/disable the state (optional)
+        notes: New notes (optional)
+
+    Only provided fields will be updated.
+    """
+    if not name:
+        return {"status": "error", "message": "name is required"}
+
+    # Build dynamic UPDATE
+    updates = []
+    params = []
+
+    if conditions is not None:
+        updates.append("conditions = %s")
+        params.append(json.dumps(conditions))
+    if interpretation is not None:
+        updates.append("interpretation = %s")
+        params.append(interpretation)
+    if recommendations is not None:
+        updates.append("recommendations = %s")
+        params.append(recommendations)
+    if emoji is not None:
+        updates.append("emoji = %s")
+        params.append(emoji)
+    if priority is not None:
+        updates.append("priority = %s")
+        params.append(priority)
+    if enabled is not None:
+        updates.append("enabled = %s")
+        params.append(enabled)
+    if notes is not None:
+        updates.append("notes = %s")
+        params.append(notes)
+
+    if not updates:
+        return {"status": "error", "message": "No fields to update"}
+
+    updates.append("updated_at = now()")
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        query = f"""
+            UPDATE state_definition
+            SET {', '.join(updates)}
+            WHERE name = %s
+            RETURNING *
+        """
+        params.append(name.upper().replace(' ', '_'))
+
+        cur.execute(query, params)
+        row = cur.fetchone()
+        conn.commit()
+        conn.close()
+
+        if not row:
+            return {"status": "error", "message": f"State '{name}' not found"}
+
+        return {
+            "status": "ok",
+            "message": f"State definition '{name}' updated",
+            "state": {
+                "name": row['name'],
+                "priority": row['priority'],
+                "conditions": row['conditions'],
+                "interpretation": row['interpretation'],
+                "recommendations": row['recommendations'],
+                "emoji": row['emoji'],
+                "enabled": row['enabled'],
+                "updated_at": to_chicago(row['updated_at'])
+            }
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to update state definition: {str(e)}"}
+
+
+@mcp.tool()
+def delete_state_definition(name: str) -> dict:
+    """
+    Delete a custom state definition.
+
+    Args:
+        name: Name of the state to delete
+
+    This permanently removes the state. Use update_state_definition with
+    enabled=False to disable instead of deleting.
+    """
+    if not name:
+        return {"status": "error", "message": "name is required"}
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            DELETE FROM state_definition
+            WHERE name = %s
+            RETURNING name
+        """, (name.upper().replace(' ', '_'),))
+
+        deleted = cur.fetchone()
+        conn.commit()
+        conn.close()
+
+        if not deleted:
+            return {"status": "error", "message": f"State '{name}' not found"}
+
+        return {
+            "status": "ok",
+            "message": f"State definition '{name}' deleted"
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to delete state definition: {str(e)}"}
+
+
+@mcp.tool()
+def create_state_from_baseline(
+    baseline_name: str,
+    state_name: str,
+    tolerance: float = 10.0,
+    interpretation: str = "",
+    recommendations: list = None,
+    emoji: str = "🧠"
+) -> dict:
+    """
+    Create a state definition from a saved baseline.
+
+    This is a convenience tool that takes an existing baseline and creates
+    a state definition with appropriate min/max thresholds based on the
+    baseline values plus/minus a tolerance.
+
+    Args:
+        baseline_name: Name of the existing baseline to use
+        state_name: Name for the new state definition
+        tolerance: +/- percentage tolerance around baseline values (default: 10)
+        interpretation: Human-readable explanation
+        recommendations: Communication recommendations
+        emoji: Display emoji
+
+    Example: If baseline alpha is 30%, with tolerance 10, creates
+    conditions {"alpha_min": 20, "alpha_max": 40}
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Get baseline
+        cur.execute("SELECT * FROM eeg_baseline WHERE name = %s", (baseline_name,))
+        baseline = cur.fetchone()
+
+        if not baseline:
+            cur.execute("SELECT name FROM eeg_baseline ORDER BY name")
+            available = [r['name'] for r in cur.fetchall()]
+            conn.close()
+            return {
+                "status": "error",
+                "message": f"Baseline '{baseline_name}' not found",
+                "available_baselines": available
+            }
+
+        # Build conditions from baseline
+        conditions = {}
+        for band in ['alpha', 'beta', 'delta', 'theta', 'gamma']:
+            value = float(baseline[f'{band}_rel'])
+            conditions[f'{band}_min'] = max(0, round(value - tolerance, 1))
+            conditions[f'{band}_max'] = min(100, round(value + tolerance, 1))
+
+        # Create the state definition
+        cur.execute("""
+            INSERT INTO state_definition
+                (name, priority, conditions, interpretation, recommendations, emoji, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (name) DO UPDATE SET
+                priority = EXCLUDED.priority,
+                conditions = EXCLUDED.conditions,
+                interpretation = EXCLUDED.interpretation,
+                recommendations = EXCLUDED.recommendations,
+                emoji = EXCLUDED.emoji,
+                notes = EXCLUDED.notes,
+                updated_at = now()
+            RETURNING created_at, updated_at
+        """, (
+            state_name.upper().replace(' ', '_'),
+            50,  # Default priority
+            json.dumps(conditions),
+            interpretation or f"State derived from baseline '{baseline_name}'",
+            recommendations,
+            emoji,
+            f"Created from baseline '{baseline_name}' with tolerance {tolerance}%"
+        ))
+
+        result = cur.fetchone()
+        conn.commit()
+        conn.close()
+
+        return {
+            "status": "ok",
+            "message": f"State '{state_name}' created from baseline '{baseline_name}'",
+            "name": state_name.upper().replace(' ', '_'),
+            "conditions": conditions,
+            "baseline_used": baseline_name,
+            "tolerance": tolerance,
+            "created_at": to_chicago(result['created_at'])
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to create state from baseline: {str(e)}"}
 
 
 def test_tools():

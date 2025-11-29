@@ -1,7 +1,7 @@
-# OSC Receiver Database Emission Fix - 2025-11-28
+# OSC Receiver Database Emission Fix + EEG MCP Server - 2025-11-28
 
 ## Context
-Database monitor was only writing 1 window to TimescaleDB instead of continuous ~1/sec emission. OSC receiver was correctly recording EEG to CSV, but analysis showed all bands at 20% (NO_SIGNAL) and no "DB: Window" debug messages appeared.
+Database monitor was only writing 1 window to TimescaleDB instead of continuous ~1/sec emission. OSC receiver was correctly recording EEG to CSV, but analysis showed all bands at 20% (NO_SIGNAL) and no "DB: Window" debug messages appeared. After fixing emission, built MCP server to expose real-time EEG consciousness state to Claude Desktop.
 
 ## Mistakes Are Learnings (Read This First)
 
@@ -74,12 +74,49 @@ Fix: Auto-switch to raw mode when osc_receiver format detected.
 ### CLAUDE.md
 - [ ] Add: "When debugging EEG analysis showing equal band %s, check if format detection matches processing mode"
 
+## MCP Server Implementation
+
+### Decision
+Built MCP server to expose EEG state to Claude Desktop, enabling attention-aware AI responses.
+
+### Architecture
+```
+Muse → Mind Monitor → OSC → Python Monitor → TimescaleDB → MCP Server → Claude Desktop
+```
+
+### Implementation
+- **scripts/eeg_mcp_server.py**: FastMCP server with 3 tools:
+  - `get_current_eeg_state()` - Current state, band powers, interpretation, recommendations
+  - `get_eeg_history(minutes)` - State transitions over time
+  - `get_session_summary()` - All recording sessions
+- **scripts/mcp-eeg-server**: Bash wrapper for WSL execution from Claude Desktop
+- **Claude Desktop config**: Added `eeg-consciousness` server via WSL
+
+### Key Pattern: WSL MCP Server
+```json
+"eeg-consciousness": {
+  "command": "wsl",
+  "args": ["-d", "Debian", "--exec", "/mnt/c/projects/MindMonitorPython/scripts/mcp-eeg-server"]
+}
+```
+
+### State Interpretations
+Claude receives recommendations based on detected state:
+- DROWSY → "Keep responses short and clear"
+- FOCUSED → "Can provide detailed technical information"
+- ALERT_TENSE → "Be supportive and calming"
+
 ## Artifacts
 - Files modified:
   - `consciousness_monitor/data/parsers.py` (extract_eeg_channels)
   - `consciousness_monitor/main.py` (auto raw-mode detection)
   - `scripts/consciousness_monitor_db_v2.py` (attribute fix)
   - `README.md` (database commands)
+- Files created:
+  - `scripts/eeg_mcp_server.py` (MCP server)
+  - `scripts/mcp-eeg-server` (WSL wrapper)
+- Config modified:
+  - `C:/Users/konra/AppData/Roaming/Claude/claude_desktop_config.json`
 - Commands run:
   - `docker compose -f docker/compose.yml exec db psql -U eeg -d eeg -c "SELECT COUNT(*) ... FROM eeg_window GROUP BY session_id"`
-- Tests: Verified 27+ windows written to session in ~30 seconds
+- Tests: Verified 27+ windows written to session in ~30 seconds, MCP tools return valid JSON

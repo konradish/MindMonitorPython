@@ -1,0 +1,7 @@
+#!/bin/bash
+# MCP EEG Server wrapper for Claude Desktop
+# This script is executed via WSL from Claude Desktop
+
+export DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg"
+cd /mnt/c/projects/MindMonitorPython
+exec /home/kodell/.local/bin/uv run python scripts/eeg_mcp_server.py

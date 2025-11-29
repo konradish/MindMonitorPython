@@ -1,0 +1,12 @@
+services:
+  osc-receiver:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.osc
+    container_name: mind-monitor-osc
+    ports:
+      - "5000:5000/udp"
+    volumes:
+      - ..:/app
+    restart: unless-stopped
+    network_mode: bridge

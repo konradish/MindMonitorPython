@@ -1,108 +1,181 @@
 # Mind Monitor Python EEG Analysis System
-Advanced real-time EEG consciousness monitoring and therapeutic pattern detection
 
-This system provides professional-grade signal processing and therapeutic pattern analysis for live brainwave data from Mind Monitor (connected to a Muse device). Features include clinical EEG band analysis, Internal Family Systems parts detection, meditation state monitoring, and nervous system regulation assessment.
+Real-time EEG consciousness monitoring and therapeutic pattern detection for Mind Monitor (Muse headband).
 
-## Usage
+## Quick Start: Recording EEG Data
 
-### Setup
+### 1. Start the OSC Receiver (Docker - Recommended)
+
+```bash
+# Start the receiver
+docker compose -f docker/docker-compose.osc.yml up -d
+
+# View logs to get your IP address
+docker compose -f docker/docker-compose.osc.yml logs -f
+```
+
+### 2. Configure Mind Monitor App
+
+1. Open Mind Monitor on your phone
+2. Go to Settings > OSC Stream
+3. Set **IP Address**: Your computer's IP (shown in Docker logs)
+4. Set **Port**: `5000`
+5. Enable OSC streaming
+
+### 3. Start Recording
+
+1. In Mind Monitor, tap **Marker 1** to start recording
+2. Data saves to `OSC-Python-Recording.csv`
+3. Tap **Marker 2** to stop recording
+
+### 4. Run Consciousness Analysis
+
+```bash
+# Real-time therapeutic monitoring (recommended)
+uv run python -m consciousness_monitor --konrad-mode
+
+# Analyze a recorded session
+uv run python -m consciousness_monitor --analyze --file OSC-Python-Recording.csv --konrad-mode
+```
+
+## Installation
+
 ```bash
 # Install dependencies
 uv sync
 ```
 
-### Components
+## Project Structure
 
-## [OSC Receiver.py](OSC%20Receiver.py)
-* Records RAW EEG to a CSV file.
-* Marker #1 starts recording. Marker #2 stops recording.
-```bash
-uv run python "OSC Receiver.py"
+```
+MindMonitorPython/
+├── consciousness_monitor/     # Main analysis package
+├── scripts/                   # OSC receivers and utilities
+│   ├── osc_receiver.py       # Main OSC data receiver
+│   ├── osc_receiver_audio.py # With audio feedback
+│   └── osc_receiver_simple.py
+├── tests/                     # Test files
+├── analysis/                  # Analysis and debug scripts
+├── data/                      # Recorded EEG data files
+├── docs/                      # Documentation
+├── docker/                    # Docker configuration
+├── tools/                     # Data ingestion tools
+├── config/                    # Configuration files
+├── assets/                    # Media files (sounds, images)
+├── archive/                   # Legacy/backup scripts
+└── sql/                       # Database schemas
 ```
 
-## [consciousness_monitor/](consciousness_monitor/) - **RECOMMENDED**
-**Modular consciousness monitoring system** with professional-grade signal processing and therapeutic pattern detection.
+## Consciousness Monitor
+
+The main analysis system with therapeutic pattern detection.
 
 ### Features
-- **Clinical EEG Analysis**: Delta, Theta, Alpha, Beta, Gamma band analysis  
-- **Therapeutic Patterns**: Jhana states, Internal Family Systems parts detection, startle responses
-- **Real-time Processing**: 0.75-1.0 second windows with optimal signal preservation
-- **Configuration-Driven**: External JSON rules for easy customization
-- **Artifact Filtering**: Multi-band spike detection, impossible combinations, extreme shifts
+
+- **Clinical EEG Analysis**: Delta, Theta, Alpha, Beta, Gamma bands
+- **Therapeutic Patterns**: Jhana states, IFS parts detection, startle responses
+- **Real-time Processing**: 0.75-1.0 second windows
+- **Configuration-Driven**: External JSON rules for customization
 
 ### Usage
-```bash
-# Enhanced therapeutic monitoring (recommended)
-uv run python consciousness_monitor.py --konrad-mode
-uv run python -m consciousness_monitor --konrad-mode
 
-# Basic consciousness monitoring
-uv run python consciousness_monitor.py
+```bash
+# Standard monitoring
 uv run python -m consciousness_monitor
 
-# Debug mode to see rule evaluation
-uv run python consciousness_monitor.py --debug --konrad-mode
+# Therapeutic mode (recommended)
+uv run python -m consciousness_monitor --konrad-mode
 
-# Custom parameters (example: 5 second window, 5 second updates)
-uv run python consciousness_monitor.py --window 5 --update 5
+# Debug mode
+uv run python -m consciousness_monitor --debug --konrad-mode
 
-# Analyze recorded session with therapeutic patterns
-uv run python consciousness_monitor.py --analyze --file "recording.csv" --konrad-mode
+# Tune thresholds
+uv run python -m consciousness_monitor --tune-rule jhana.alpha_min=85
 
-# Tune detection thresholds without code changes
-uv run python consciousness_monitor.py --tune-rule jhana.alpha_min=85
-
-# Load custom rule sets
-uv run python consciousness_monitor.py --load-rules my_therapeutic_rules.json
+# Custom window/update rate
+uv run python -m consciousness_monitor --window 1.0 --update 2
 ```
 
 ### Detected States
-- **Therapeutic Patterns**: JHANA/TRANSCENDENT, YOUNG PART CONNECTED, HOPEFUL PART ACTIVE, SECURITY GUARD ACTIVE
-- **Standard Patterns**: RELAXED, FOCUSED, CREATIVE/FLOW, MEDITATIVE, DROWSY, PEAK FOCUS, ALERT/TENSE
 
-## [realtime_consciousness_analyzer.py](realtime_consciousness_analyzer.py)
-* Basic real-time consciousness monitoring
+**Therapeutic Patterns:**
+- JHANA/TRANSCENDENT - Deep meditative absorption
+- YOUNG PART CONNECTED - Vulnerable, childlike state
+- HOPEFUL PART ACTIVE - Optimistic consciousness
+- SECURITY GUARD ACTIVE - Threat detection
+
+**Standard Patterns:**
+- RELAXED, FOCUSED, CREATIVE/FLOW, MEDITATIVE, DROWSY, PEAK FOCUS, ALERT/TENSE
+
+## Database Integration (TimescaleDB)
+
+Store EEG analysis windows and detections in TimescaleDB for later analysis.
+
+### Setup
+
 ```bash
-uv run python realtime_consciousness_analyzer.py
+# Start TimescaleDB
+docker compose -f docker/compose.yml up -d db
+
+# Generate a session ID
+SESSION_ID=$(uuidgen)
+echo "Session ID: $SESSION_ID"
 ```
 
-## [OSC Receiver Audio Feedback.py](OSC%20Receiver%20Audio%20Feedback.py)
-![alt image](RelativeGraph.jpg)
-* Calculates and graphs the relative waves.
-* Plays a sound file if Alpha relative reaches a pre-set threshold.
-* Displays if the headband is correctly fitted in the console.
+### Run with Database Logging
 
-## [OSC Receiver Simple.py](OSC%20Receiver%20Simple.py)
-* Displays RAW EEG.
+The monitor auto-detects OSC receiver format and switches to raw signal processing.
 
-## Architecture
+```bash
+# Database-only mode (silent, writes ~1 window/second to DB)
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" \
+  uv run python scripts/consciousness_monitor_db_v2.py \
+  --db-only --session-id $SESSION_ID --konrad-mode --csv OSC-Python-Recording.csv
 
-### Modular Design
-The consciousness monitor is organized as a Python package with clear separation of concerns:
+# With debug output (see database emissions)
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" \
+  uv run python scripts/consciousness_monitor_db_v2.py \
+  --db-only --debug --session-id $SESSION_ID --konrad-mode --csv OSC-Python-Recording.csv
 
-```
-consciousness_monitor/
-├── main.py                    # Core orchestration (540 lines vs. original 2527)
-├── config/                    # Configuration management
-│   ├── detection_rules.json  # Therapeutic pattern rules
-│   ├── sub_states.json       # Sub-state definitions  
-│   └── *.py                  # Rule/threshold managers
-├── data/                     # Data processing & parsing
-├── detection/                # Pattern detection & analysis
-├── ui/                      # Display & user interface
-└── utils/                   # Mathematical helpers
+# Dual mode (UI + database)
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" \
+  uv run python scripts/consciousness_monitor_db_v2.py \
+  --dual --double-parse-ok --session-id $SESSION_ID --konrad-mode --csv OSC-Python-Recording.csv
 ```
 
-### Benefits
-- **18 focused modules** instead of 1 monolithic file
-- Each module **<300 lines** with clear responsibility  
-- **Maintainable** with clean interfaces between components
-- **Extensible** architecture for adding new features
-- **Backward compatible** - all existing functionality preserved
+### Query Data
 
-### Technical Details
+```bash
+# Check window count for session
+docker compose -f docker/compose.yml exec db \
+  psql -U eeg -d eeg -c "SELECT COUNT(*) FROM eeg_window WHERE session_id = '$SESSION_ID';"
+
+# View windows by session
+docker compose -f docker/compose.yml exec db \
+  psql -U eeg -d eeg -c "SELECT COUNT(*) as windows, session_id FROM eeg_window GROUP BY session_id ORDER BY windows DESC;"
+
+# View recent windows with band powers
+docker compose -f docker/compose.yml exec db \
+  psql -U eeg -d eeg -c "SELECT ts_start, alpha_rel, beta_rel, delta_rel FROM eeg_window ORDER BY ts_start DESC LIMIT 5;"
+```
+
+## Alternative: Direct Python OSC Receiver
+
+If Docker isn't available:
+
+```bash
+uv run python scripts/osc_receiver.py
+```
+
+Note: On WSL, you may need to configure port forwarding manually. See [CLAUDE.md](CLAUDE.md) for troubleshooting.
+
+## Technical Details
+
 - **Sample Rate**: 256 Hz (Muse standard)
-- **Window Size**: 0.75-1.0 seconds (optimal for Mind Monitor)
-- **Preprocessing**: DC removal only (preserves alpha waves)
+- **Signal Range**: 200-1200 µV typical
 - **Frequency Bands**: Delta (0.5-4Hz), Theta (4-8Hz), Alpha (8-13Hz), Beta (13-30Hz), Gamma (30-50Hz)
-- **Data Format**: CSV with TimeStamp, RAW_TP9, RAW_AF7, RAW_AF8, RAW_TP10, AUX channels
+- **Channels**: TP9 (left ear), AF7 (left forehead), AF8 (right forehead), TP10 (right ear)
+
+## License
+
+See [LICENSE](LICENSE) file.

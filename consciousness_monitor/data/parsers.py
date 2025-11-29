@@ -12,10 +12,11 @@ from ..config.settings import Settings
 
 class DataParser:
     """Handles parsing of different EEG data formats."""
-    
-    def __init__(self):
+
+    def __init__(self, debug=False):
         self.settings = Settings()
         self.data_columns = self.settings.get_data_columns()
+        self.debug = debug
     
     def detect_format(self, csv_file: str) -> str:
         """
@@ -37,6 +38,8 @@ class DataParser:
             
             if first_line.startswith('timestamp_utc'):
                 return "mind_monitor"
+            elif first_line.startswith('TimeStamp') and 'RAW_' in first_line:
+                return "osc_receiver"  # Our OSC receiver format
             elif ',' in first_line and ('/muse/' in first_line or first_line.split(',')[0].replace('.', '').isdigit()):
                 return "muse_player"
             else:
@@ -273,25 +276,31 @@ class DataParser:
                 return latest_df, format_type
                 
             elif format_type == "muse_player":
-                # For large muse_player files, read only the last portion
-                # Estimate lines needed (assume ~4 lines per sample for safety)
-                lines_needed = window_samples * 6  # More lines than needed for safety
-                
-                # Read only the tail of the file efficiently
+                # For large muse_player files, read only the last portion efficiently
+                # Use the more efficient tail-reading approach
+                lines_needed = window_samples * 4  # Enough lines to get window_samples of EEG data
+
+                # Read only the tail of the file efficiently using subprocess
                 try:
                     import subprocess
-                    result = subprocess.run(['tail', '-n', str(lines_needed), csv_file], 
-                                          capture_output=True, text=True, timeout=5)
-                    if result.returncode == 0:
+                    # Use tail command which is very fast even on large files
+                    result = subprocess.run(['tail', '-n', str(lines_needed), csv_file],
+                                          capture_output=True, text=True, timeout=2)
+                    if result.returncode == 0 and result.stdout:
                         lines = result.stdout.strip().split('\n')
-                        # Parse these lines instead of the whole file
+                        # Parse these lines efficiently
                         structured_data = self._parse_muse_lines(lines)
                     else:
-                        # Fallback to regular parsing with limited rows
+                        raise Exception("tail command failed")
+                except Exception as e:
+                    # Fallback: read file backwards using Python (still efficient)
+                    try:
+                        structured_data = self._read_file_tail(csv_file, lines_needed)
+                    except Exception as e2:
+                        # Last resort: parse with pandas but limit rows
+                        if self.debug:
+                            print(f"⚠️ Both tail methods failed, using pandas: {e}, {e2}")
                         structured_data = self.parse_muse_player_csv(csv_file, max_rows=lines_needed)
-                except:
-                    # Fallback to regular parsing with limited rows
-                    structured_data = self.parse_muse_player_csv(csv_file, max_rows=lines_needed)
                 
                 # Convert to DataFrame format similar to Mind Monitor
                 if structured_data['timestamp']:
@@ -324,6 +333,34 @@ class DataParser:
                 else:
                     return None, format_type
             
+            elif format_type == "osc_receiver":
+                # OSC Receiver format: TimeStamp,RAW_TP9,RAW_AF7,RAW_AF8,RAW_TP10,AUX1,AUX2,AUX3,AUX4,Marker
+                df = pd.read_csv(csv_file)
+                if len(df) > window_samples:
+                    latest_df = df.tail(window_samples).copy()
+                else:
+                    latest_df = df.copy()
+
+                # Rename columns to match expected format
+                column_mapping = {
+                    'TimeStamp': 'timestamp',
+                    'RAW_TP9': 'eeg_tp9',
+                    'RAW_AF7': 'eeg_af7',
+                    'RAW_AF8': 'eeg_af8',
+                    'RAW_TP10': 'eeg_tp10',
+                    'AUX1': 'aux1',
+                    'AUX2': 'aux2',
+                    'AUX3': 'aux3',
+                    'AUX4': 'aux4'
+                }
+                latest_df = latest_df.rename(columns=column_mapping)
+
+                # Parse timestamp
+                if 'timestamp' in latest_df.columns:
+                    latest_df['timestamp'] = pd.to_datetime(latest_df['timestamp'])
+
+                return latest_df, format_type
+
             else:
                 print(f"⚠️ Unknown format: {format_type}")
                 return None, format_type
@@ -334,35 +371,92 @@ class DataParser:
     
     def _parse_muse_lines(self, lines: List[str]) -> Dict[str, Any]:
         """Parse a list of muse lines efficiently."""
+        from datetime import datetime
+
         structured_data = {
             'timestamp': [],
             'eeg': {'tp9': [], 'af7': [], 'af8': [], 'tp10': []},
             'optics': {},
             'markers': []
         }
-        
+
         for line in lines:
             try:
                 parts = line.strip().split(',')
-                if len(parts) < 2:
+                if len(parts) < 5:  # Need at least timestamp + 4 EEG channels
                     continue
-                
-                timestamp = float(parts[0])
-                message = parts[1].strip()
-                
-                # Parse EEG data
-                if '/muse/eeg' in message and len(parts) >= 6:
-                    values = [float(parts[i]) for i in range(2, 6)]
+
+                # Skip header line
+                if parts[0].lower().startswith('time'):
+                    continue
+
+                # Parse timestamp - can be datetime string or Unix timestamp
+                timestamp_str = parts[0].strip()
+                try:
+                    # Try parsing as datetime string first (OSC Receiver format)
+                    dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+                    timestamp = dt.timestamp()
+                except ValueError:
+                    # Try parsing as float (Unix timestamp)
+                    try:
+                        timestamp = float(timestamp_str)
+                    except ValueError:
+                        continue
+
+                # Parse EEG data (columns 1-4 are TP9, AF7, AF8, TP10)
+                try:
+                    values = [float(parts[i]) for i in range(1, 5)]
                     structured_data['timestamp'].append(timestamp)
                     structured_data['eeg']['tp9'].append(values[0])
                     structured_data['eeg']['af7'].append(values[1])
                     structured_data['eeg']['af8'].append(values[2])
                     structured_data['eeg']['tp10'].append(values[3])
-                    
+                except (ValueError, IndexError):
+                    pass
+
             except (ValueError, IndexError):
                 continue
-        
+
         return structured_data
+
+    def _read_file_tail(self, csv_file: str, num_lines: int) -> Dict[str, Any]:
+        """Read the last N lines of a file efficiently without loading the whole file."""
+        import os
+
+        structured_data = {
+            'timestamp': [],
+            'eeg': {'tp9': [], 'af7': [], 'af8': [], 'tp10': []},
+            'optics': {},
+            'markers': []
+        }
+
+        try:
+            # Get file size
+            file_size = os.path.getsize(csv_file)
+
+            # Estimate bytes per line (average ~100 bytes per line)
+            estimated_bytes = num_lines * 100
+
+            # Read from the end of file
+            with open(csv_file, 'rb') as f:
+                # Seek to estimated position
+                seek_pos = max(0, file_size - estimated_bytes)
+                f.seek(seek_pos)
+
+                # Read remaining content
+                content = f.read().decode('utf-8', errors='ignore')
+                lines = content.strip().split('\n')
+
+                # Take the last num_lines
+                lines = lines[-num_lines:]
+
+                # Parse these lines
+                return self._parse_muse_lines(lines)
+
+        except Exception as e:
+            if self.debug:
+                print(f"⚠️ File tail read failed: {e}")
+            return structured_data
     
     def extract_eeg_channels(self, df: pd.DataFrame, format_type: str) -> Dict[str, np.ndarray]:
         """
@@ -391,7 +485,14 @@ class DataParser:
                     if col.startswith('eeg_'):
                         channel_name = col.replace('eeg_', '')
                         channels[channel_name] = df[col].values
-            
+
+            elif format_type == "osc_receiver":
+                # OSC Receiver format (columns already renamed to eeg_tp9, etc.)
+                for col in df.columns:
+                    if col.startswith('eeg_'):
+                        channel_name = col.replace('eeg_', '')
+                        channels[channel_name] = df[col].values
+
             # Remove channels with all NaN values
             channels = {k: v for k, v in channels.items() if not np.all(np.isnan(v))}
             

@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+# Install python-osc
+RUN pip install --no-cache-dir python-osc
+
+WORKDIR /app
+
+# Expose UDP port 5000
+EXPOSE 5000/udp
+
+# Set Python unbuffered mode
+ENV PYTHONUNBUFFERED=1
+
+# Run the OSC receiver (volume mounted at runtime)
+CMD ["python", "-u", "scripts/osc_receiver.py"]

@@ -1,0 +1,24 @@
+<View>
+  <Style>.lsf-main { max-width: 1200px; }</Style>
+
+  <TimeSeries name="ts" value="$timeseries" timeColumn="time" sep="," >
+    <Channel value="alpha_rel" />
+    <Channel value="beta_rel" />
+    <Channel value="theta_rel" />
+    <Channel value="delta_rel" />
+    <Channel value="gamma_rel" />
+  </TimeSeries>
+
+  <TimeSeriesLabels name="lbl" toName="ts">
+    <Label value="Calm" />
+    <Label value="Focused-Engaged" />
+    <Label value="Flow-Absorbed" />
+    <Label value="Mind-Wandering" />
+    <Label value="Anxious-Escalating" />
+    <Label value="Peak Anxiety" />
+    <Label value="Recovering" />
+    <Label value="Hypervigilance Spike" />
+    <Label value="Jhana-Entry" />
+    <Label value="Artifact/Movement" />
+  </TimeSeriesLabels>
+</View>

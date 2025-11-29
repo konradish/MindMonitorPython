@@ -129,3 +129,19 @@ dmypy.json
 .pyre/
 /.vscode
 /OSC.code-workspace
+
+# EEG large files & local data
+data/
+labelstudio_data/
+archive/
+*.csv
+*.csv.gz
+*.parquet
+*.tsv
+*.tmp
+
+# Python/DS
+.ipynb_checkpoints/
+
+# Docker/compose
+db_data/

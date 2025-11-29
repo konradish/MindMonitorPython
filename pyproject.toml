@@ -8,9 +8,18 @@ dependencies = [
     "matplotlib>=3.10.3",
     "numpy>=2.3.2",
     "pandas>=2.3.1",
+    "psycopg2-binary>=2.9.0",
     "pyqt5>=5.15.11",
     "pytest>=8.4.1",
     "python-osc>=1.9.3",
     "scipy>=1.16.0",
     "setuptools>=80.9.0",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["consciousness_monitor*"]
+exclude = ["config*", "tools*"]

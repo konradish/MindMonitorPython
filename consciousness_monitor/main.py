@@ -8,6 +8,7 @@ while maintaining backward compatibility with the original API.
 import os
 import time
 import argparse
+import uuid
 from datetime import datetime
 from typing import Dict, Optional, Any, List
 import pandas as pd
@@ -18,6 +19,13 @@ from .data import DataParser, SignalProcessor, EEGReading, AnalysisResult
 from .detection import DetectionEngine, TherapeuticPatterns
 from .ui import DisplayManager, CommandInterface, ReportGenerator
 from .data.models import BandPower
+
+# Import sink for database integration
+try:
+    from .sinks import TimescaleSink
+    TIMESCALE_AVAILABLE = True
+except ImportError:
+    TIMESCALE_AVAILABLE = False
 
 
 class EnhancedConsciousnessMonitor:
@@ -37,10 +45,10 @@ class EnhancedConsciousnessMonitor:
         # Store configuration
         self.csv_file = csv_file
         self.window_seconds = window_seconds
-        self.update_interval = update_interval
+        self.update_interval = update_interval or 1.0
         self.use_precomputed = use_precomputed
         self.force_output = force_output
-        self.output_interval = output_interval or (30 if not force_output else update_interval)
+        self.output_interval = output_interval or (30 if not force_output else self.update_interval)
         self.debug = debug
         self.konrad_mode = konrad_mode
         self.gamma_sensitivity = gamma_sensitivity
@@ -53,9 +61,9 @@ class EnhancedConsciousnessMonitor:
         self.sample_rate = self.data_parser.detect_sample_rate(csv_file)
         self.window_samples = int(window_seconds * self.sample_rate)
         
-        # Auto-switch to raw processing for muse_player format
-        if self.data_format == "muse_player" and use_precomputed:
-            print("📊 Muse player format detected - switching to raw signal processing")
+        # Auto-switch to raw processing for formats with raw EEG data
+        if self.data_format in ("muse_player", "osc_receiver") and use_precomputed:
+            print(f"📊 {self.data_format} format detected - switching to raw signal processing")
             self.use_precomputed = False
         else:
             self.use_precomputed = use_precomputed
@@ -102,6 +110,19 @@ class EnhancedConsciousnessMonitor:
         self.session_start = time.time()
         self.last_output_time = 0
         self.last_state = None
+        self.session_id = str(uuid.uuid4())  # Generate unique session ID
+        
+        # Initialize TimescaleSink if available
+        self.sink = None
+        if TIMESCALE_AVAILABLE and os.environ.get('DATABASE_URL'):
+            try:
+                self.sink = TimescaleSink()
+                if self.debug:
+                    print(f"✅ TimescaleSink initialized for session {self.session_id}")
+            except Exception as e:
+                if self.debug:
+                    print(f"⚠️  TimescaleSink initialization failed: {e}")
+                self.sink = None
         
         # Display startup information
         self._display_startup_info()
@@ -465,6 +486,50 @@ class EnhancedConsciousnessMonitor:
             state=result.state,
             ratios=result.band_percentages
         )
+        
+        # Send to TimescaleSink if available
+        if self.sink:
+            try:
+                self._send_to_timescale(result, timestamp)
+            except Exception as e:
+                if self.debug:
+                    print(f"⚠️  TimescaleSink error: {e}")
+    
+    def _send_to_timescale(self, result: AnalysisResult, timestamp: datetime):
+        """Send analysis result to TimescaleDB."""
+        # Create window data
+        window_data = {
+            'session_id': self.session_id,
+            'ts_start': timestamp.isoformat(),
+            'ts_end': timestamp.isoformat(),  # Single-point window
+            'alpha_rel': result.band_percentages.get('alpha', 0.0) / 100.0,
+            'beta_rel': result.band_percentages.get('beta', 0.0) / 100.0,
+            'theta_rel': result.band_percentages.get('theta', 0.0) / 100.0,
+            'delta_rel': result.band_percentages.get('delta', 0.0) / 100.0,
+            'gamma_rel': result.band_percentages.get('gamma', 0.0) / 100.0,
+            'entropy': getattr(result, 'entropy', None),
+            'artifact_flags': getattr(result, 'artifact_flags', {}),
+            'features': {
+                'state': result.state,
+                'display_name': result.get_display_name(),
+                'has_artifacts': result.has_artifacts()
+            }
+        }
+        
+        # Send window data
+        self.sink.on_windows([window_data])
+        
+        # Send detection if it's a significant state
+        if result.state != "NO_SIGNAL" and result.state != "BASELINE":
+            self.sink.on_detection(
+                session_id=self.session_id,
+                start=timestamp.isoformat(),
+                end=timestamp.isoformat(),
+                label=result.get_display_name(),
+                source="rule",
+                score=getattr(result, 'confidence_score', None),
+                extra={'emoji': result.emoji, 'insights': result.insights}
+            )
     
     def _get_no_signal_result(self, timestamp=None) -> AnalysisResult:
         """Create a no-signal result."""

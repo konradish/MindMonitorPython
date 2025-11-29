@@ -26,10 +26,17 @@ class ArtifactThresholds:
                 data = json.load(f)
                 # Extract just the values for backward compatibility
                 raw_thresholds = data.get("thresholds", {})
-                self.thresholds = {
-                    key: config["value"] 
-                    for key, config in raw_thresholds.items()
-                }
+                self.thresholds = {}
+                for key, config in raw_thresholds.items():
+                    if isinstance(config, dict) and "value" in config:
+                        # Simple threshold with "value" key
+                        self.thresholds[key] = config["value"]
+                    elif isinstance(config, dict):
+                        # Complex threshold - store the whole dict
+                        self.thresholds[key] = config
+                    else:
+                        # Direct value
+                        self.thresholds[key] = config
                 self.version = data.get("version", "unknown")
         except Exception as e:
             print(f"⚠️ Error loading artifact thresholds: {e}")

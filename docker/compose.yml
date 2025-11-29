@@ -1,0 +1,56 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: eeg_timescaledb
+    environment:
+      POSTGRES_USER: eeg
+      POSTGRES_PASSWORD: eegpass
+      POSTGRES_DB: eeg
+      TIMESCALEDB_TELEMETRY: "off"
+    ports:
+      - "${DB_PORT:-5590}:5432"  # Expose on port 5590 to avoid default 5432 conflicts
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ../sql/init.sql:/docker-entrypoint-initdb.d/00_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eeg -d eeg"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  labelstudio:
+    image: heartexlabs/label-studio:latest
+    container_name: label_studio
+    user: "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED: "true"
+      LABEL_STUDIO_ALLOW_ORGANIZATION_CREATION: "true"
+    ports:
+      - "${LS_PORT:-58180}:8080"
+    volumes:
+      - ../labelstudio_data:/label-studio/data
+      - ../labelstudio/label_config.xml:/label-studio/label_config.xml:ro
+
+  eeg_app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: eeg_app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://eeg:eegpass@db:5432/eeg
+      EEG_AUTHOR: konrad
+    volumes:
+      - ../data:/app/data
+      - ../config:/app/config
+      - ../consciousness_monitor:/app/consciousness_monitor
+      - ../tools:/app/tools
+    command: ["uv", "run", "python", "-m", "consciousness_monitor"]
+
+volumes:
+  db_data:

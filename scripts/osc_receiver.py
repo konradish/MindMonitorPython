@@ -29,13 +29,16 @@ def eeg_handler(address: str,*args):
     if auxCount==-1:
         auxCount = len(args)-4
         writeFileHeader()
+        print(f"EEG data received! Channels: {len(args)}")
     if recording:
         timestampStr = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         fileString = timestampStr
         for arg in args:
-            fileString += ","+str(arg)            
+            fileString += ","+str(arg)
         fileString+="\n"
         f.write(fileString)
+    elif auxCount > -1:  # Only print after first data received
+        print("EEG data flowing (not recording - send Marker 1 to start)")
     
 def marker_handler(address: str,i):
     global recording

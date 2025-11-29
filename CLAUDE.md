@@ -139,3 +139,59 @@ docker compose -f docker/docker-compose.osc.yml logs -f
 ```
 
 For WSL without Docker, see manual port forwarding instructions in docs/.
+
+## Database Integration (TimescaleDB)
+
+```bash
+# Start database
+docker compose -f docker/compose.yml up -d db
+
+# Run monitor with DB logging
+SESSION_ID=$(uuidgen)
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" \
+  uv run python scripts/consciousness_monitor_db_v2.py \
+  --db-only --session-id $SESSION_ID --konrad-mode --csv OSC-Python-Recording.csv
+
+# Check windows written
+docker compose -f docker/compose.yml exec db \
+  psql -U eeg -d eeg -c "SELECT COUNT(*) FROM eeg_window WHERE session_id = '$SESSION_ID';"
+```
+
+## EEG MCP Server (Claude Desktop Integration)
+
+The MCP server exposes real-time EEG state to Claude Desktop, enabling attention-aware responses.
+
+**Architecture:** `Muse → Mind Monitor → OSC → Python Monitor → TimescaleDB → MCP Server → Claude Desktop`
+
+**Files:**
+- `scripts/eeg_mcp_server.py` - FastMCP server with tools
+- `scripts/mcp-eeg-server` - WSL wrapper for Claude Desktop
+
+**MCP Tools:**
+- `get_current_eeg_state()` - Current state, band powers, interpretation, recommendations
+- `get_eeg_history(minutes)` - State transitions over time
+- `get_session_summary()` - All recording sessions
+
+**Claude Desktop Config** (`C:/Users/konra/AppData/Roaming/Claude/claude_desktop_config.json`):
+```json
+"eeg-consciousness": {
+  "command": "wsl",
+  "args": ["-d", "Debian", "--exec", "/mnt/c/projects/MindMonitorPython/scripts/mcp-eeg-server"]
+}
+```
+
+**Testing:**
+```bash
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" \
+  uv run python scripts/eeg_mcp_server.py --test
+```
+
+## Data Format Detection
+
+| Format | Detection | Processing Mode | Columns |
+|--------|-----------|-----------------|---------|
+| `mind_monitor` | `timestamp_utc` header | precomputed | `alpha_rel`, `beta_rel`, etc. |
+| `muse_player` | `/muse/eeg` messages | raw FFT | Comma-separated values |
+| `osc_receiver` | `TimeStamp` + `RAW_` columns | raw FFT | `RAW_TP9`, `RAW_AF7`, etc. |
+
+**Debugging tip:** If all bands show equal % (20% each), check if format detection matches processing mode. OSC receiver format requires raw mode (auto-detected).

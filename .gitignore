@@ -145,3 +145,6 @@ archive/
 
 # Docker/compose
 db_data/
+
+# Conductor reasoning logs
+logs/

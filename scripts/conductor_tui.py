@@ -37,8 +37,14 @@ CHICAGO_TZ = ZoneInfo("America/Chicago")
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent
 BEATS_LIBRARY_PATH = PROJECT_ROOT / "config" / "beats-library.yaml"
+CONDUCTOR_PROMPT_PATH = PROJECT_ROOT / "config" / "conductor-prompt.md"
 PATTERN_FILE = Path("/mnt/c/projects/prompt-kit/chrome-automation/pattern.txt")
 SESSION_FILE = Path("/tmp/conductor_session.json")
+DECISION_FILE = Path("/tmp/conductor_decision.json")
+REASONING_LOG = PROJECT_ROOT / "logs" / "conductor_reasoning.log"
+
+# LLM Mode toggle
+USE_LLM_CONDUCTOR = os.environ.get("LLM_CONDUCTOR", "1") == "1"
 
 # Database
 DATABASE_URL = os.environ.get(
@@ -189,6 +195,101 @@ def play_pattern_sync(pattern_code: str) -> tuple[bool, str]:
         return True, result.stdout
     except Exception as e:
         return False, str(e)
+
+
+def log_reasoning(reasoning: str, pattern_name: str, action: str) -> None:
+    """Append reasoning to the log file."""
+    REASONING_LOG.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(REASONING_LOG, 'a') as f:
+        f.write(f"\n[{timestamp}] Action: {action}\n")
+        f.write(f"Pattern: {pattern_name}\n")
+        f.write(f"Reasoning: {reasoning}\n")
+        f.write("-" * 60 + "\n")
+
+
+def call_llm_conductor(eeg_state: dict, current_pattern: str, pattern_duration_min: float,
+                       library: dict, user_message: str = None) -> Optional[dict]:
+    """Call Claude Code CLI to make conductor decision."""
+    # Build context for Claude
+    patterns_summary = []
+    for name, data in library.get("library", {}).items():
+        moods = ", ".join(data.get("moods", []))
+        patterns_summary.append(f"- {name}: {moods}")
+
+    context = f"""## Current State
+- EEG State: {eeg_state.get('state', 'UNKNOWN')}
+- Alpha: {eeg_state.get('bands', {}).get('alpha', 0):.1f}%
+- Beta: {eeg_state.get('bands', {}).get('beta', 0):.1f}%
+- Theta: {eeg_state.get('bands', {}).get('theta', 0):.1f}%
+- Delta: {eeg_state.get('bands', {}).get('delta', 0):.1f}%
+- Gamma: {eeg_state.get('bands', {}).get('gamma', 0):.1f}%
+- Data Fresh: {eeg_state.get('is_fresh', False)}
+
+## Current Pattern
+- Name: {current_pattern or 'None'}
+- Playing for: {pattern_duration_min:.1f} minutes
+
+## Available Patterns
+{chr(10).join(patterns_summary)}
+
+## User Message
+{user_message or 'None'}
+
+## Your Task
+Decide whether to change the pattern or keep it. Write your decision to {DECISION_FILE}.
+Remember: stability is good, don't change too often unless the state clearly calls for it.
+"""
+
+    # Read system prompt
+    system_prompt = ""
+    if CONDUCTOR_PROMPT_PATH.exists():
+        system_prompt = CONDUCTOR_PROMPT_PATH.read_text()
+
+    # Pre-create decision file (Write tool requires file to exist)
+    DECISION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(DECISION_FILE, 'w') as f:
+        json.dump({"action": "pending"}, f)
+
+    # Call Claude CLI
+    try:
+        cmd = [
+            '/home/kodell/.claude/local/claude',
+            '-p',
+            '--dangerously-skip-permissions',
+            '--tools', 'Read,Write,WebSearch,WebFetch,mcp__eeg-consciousness__get_current_eeg_state',
+            '--append-system-prompt', system_prompt,
+            context
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+        # Debug: log any errors from Claude
+        if result.returncode != 0 or result.stderr:
+            log_reasoning(f"Claude stderr: {result.stderr[:500] if result.stderr else 'none'}", "N/A", "debug")
+
+        # Read decision file
+        if DECISION_FILE.exists():
+            with open(DECISION_FILE) as f:
+                decision = json.load(f)
+
+            # Check if Claude actually wrote a decision
+            if decision.get('action') == 'pending':
+                log_reasoning("Claude did not write a decision", "N/A", "error")
+                return None
+
+            # Log the reasoning
+            log_reasoning(
+                decision.get('reasoning', 'No reasoning provided'),
+                decision.get('pattern_name', 'N/A'),
+                decision.get('action', 'unknown')
+            )
+
+            return decision
+        else:
+            return None
+    except Exception as e:
+        log_reasoning(f"LLM call failed: {e}", "N/A", "error")
+        return None
 
 
 def load_session() -> dict:
@@ -379,7 +480,11 @@ class ConductorApp(App):
     def on_mount(self) -> None:
         """Start background tasks on mount."""
         self.log_message("[bold green]Neural Music Conductor started[/]")
+        mode = "[bold cyan]LLM Mode (Claude Code)[/]" if USE_LLM_CONDUCTOR else "[yellow]Rule-based Mode[/]"
+        self.log_message(f"Mode: {mode}")
         self.log_message(f"Loaded {len(self.library.get('library', {}))} patterns")
+        if USE_LLM_CONDUCTOR:
+            self.log_message(f"[dim]Reasoning log: {REASONING_LOG}[/]")
         self.set_interval(self.poll_interval, self.poll_eeg)
         self.set_interval(1.0, self.update_playing_time)
 
@@ -448,30 +553,120 @@ class ConductorApp(App):
         # Check cooldown
         now = asyncio.get_event_loop().time()
         if now - self.last_change_time < self.change_cooldown:
+            # Allow override for user messages
+            if not self.pending_message:
+                return
+
+        # Get user message if any
+        user_message = self.pending_message
+        self.pending_message = None
+
+        if USE_LLM_CONDUCTOR:
+            await self.llm_decide_pattern(eeg, user_message)
+        else:
+            # Legacy rule-based logic
+            should_change = False
+            reason = ""
+
+            if len(last_states) >= 3 and last_states[-1] != last_states[-2] and last_states[-1] != last_states[-3]:
+                should_change = True
+                reason = f"State changed to {state}"
+
+            if not self.session.get("current_pattern"):
+                should_change = True
+                reason = "Initial pattern"
+
+            if user_message:
+                should_change = True
+                reason = f"User request: {user_message}"
+
+            if should_change:
+                await self.change_pattern(state, reason)
+
+    async def llm_decide_pattern(self, eeg: dict, user_message: str = None) -> None:
+        """Use Claude Code to decide pattern changes."""
+        import concurrent.futures
+
+        # Calculate pattern duration
+        pattern_duration_min = 0.0
+        start_str = self.session.get("pattern_start_time")
+        if start_str:
+            start = datetime.fromisoformat(start_str)
+            pattern_duration_min = (datetime.now() - start).total_seconds() / 60
+
+        current_pattern = self.session.get("current_pattern")
+
+        self.log_message(f"[cyan]Asking Claude for decision...[/]")
+
+        # Call LLM in thread pool to not block
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(
+                call_llm_conductor,
+                eeg,
+                current_pattern,
+                pattern_duration_min,
+                self.library,
+                user_message
+            )
+            try:
+                decision = future.result(timeout=90)
+            except Exception as e:
+                self.log_message(f"[red]LLM call failed: {e}[/]")
+                return
+
+        if not decision:
+            self.log_message(f"[yellow]No decision from LLM[/]")
             return
 
-        # Decide if we should change
-        should_change = False
-        reason = ""
+        action = decision.get("action", "keep")
+        reasoning = decision.get("reasoning", "No reason given")
 
-        # State transition (different from last 2)
-        if len(last_states) >= 3 and last_states[-1] != last_states[-2] and last_states[-1] != last_states[-3]:
-            should_change = True
-            reason = f"State changed to {state}"
+        # Truncate reasoning for display
+        short_reasoning = reasoning[:100] + "..." if len(reasoning) > 100 else reasoning
+        self.log_message(f"[dim]LLM: {short_reasoning}[/]")
 
-        # First pattern
-        if not self.session.get("current_pattern"):
-            should_change = True
-            reason = "Initial pattern"
+        if action == "keep":
+            self.log_message(f"[blue]Keeping current pattern[/]")
+            return
 
-        # Pending message from user
-        if self.pending_message:
-            should_change = True
-            reason = f"User request: {self.pending_message}"
-            self.pending_message = None
+        # Action is "change"
+        pattern_name = decision.get("pattern_name")
+        pattern_code = decision.get("pattern_code")
 
-        if should_change:
-            await self.change_pattern(state, reason)
+        if not pattern_code:
+            # Look up pattern from library
+            lib_pattern = self.library.get("library", {}).get(pattern_name)
+            if lib_pattern:
+                pattern_code = lib_pattern.get("pattern")
+            else:
+                self.log_message(f"[red]Pattern {pattern_name} not found[/]")
+                return
+
+        self.log_message(f"[green]Playing: {pattern_name}[/]")
+
+        # Play the pattern
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(play_pattern_sync, pattern_code)
+            success, output = future.result(timeout=20)
+
+        self.log_message(f"[dim]Automation: {output[:100] if output else 'no output'}[/]")
+        if success:
+            self.session["current_pattern"] = pattern_name
+            self.session["pattern_start_time"] = datetime.now().isoformat()
+            recent = self.session.get("recent_patterns", [])
+            recent.append(pattern_name)
+            self.session["recent_patterns"] = recent[-10:]
+            self.last_change_time = asyncio.get_event_loop().time()
+
+            # Update pattern widget
+            pw = self.query_one(PatternWidget)
+            pw.pattern_name = pattern_name
+            lib_pattern = self.library.get("library", {}).get(pattern_name, {})
+            pw.moods = ", ".join(lib_pattern.get("moods", []))
+
+            save_session(self.session)
+        else:
+            self.log_message("[red]Failed to play pattern[/]")
 
     async def change_pattern(self, state: str, reason: str) -> None:
         """Select and play a new pattern."""

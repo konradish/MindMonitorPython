@@ -2,8 +2,9 @@
 # Neural Music Conductor - One command to start everything
 #
 # Usage:
-#   ./scripts/conductor          # Start full stack
+#   ./scripts/conductor          # Start full stack (LLM mode)
 #   ./scripts/conductor --tui    # Just the TUI (assumes Chrome/DB running)
+#   ./scripts/conductor --simple # Use rule-based mode instead of LLM
 #   ./scripts/conductor --stop   # Stop everything
 
 set -e
@@ -11,6 +12,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DB_URL="postgresql://eeg:eegpass@localhost:5590/eeg"
+
+# LLM mode by default
+LLM_CONDUCTOR="${LLM_CONDUCTOR:-1}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -48,9 +52,13 @@ start_chrome() {
 }
 
 start_tui() {
-    log "Starting Conductor TUI..."
+    if [ "$LLM_CONDUCTOR" = "1" ]; then
+        log "Starting Conductor TUI (LLM Mode)..."
+    else
+        log "Starting Conductor TUI (Rule-based Mode)..."
+    fi
     echo ""
-    DATABASE_URL="$DB_URL" uv run python "$SCRIPT_DIR/conductor_tui.py"
+    DATABASE_URL="$DB_URL" LLM_CONDUCTOR="$LLM_CONDUCTOR" uv run python "$SCRIPT_DIR/conductor_tui.py"
 }
 
 stop_all() {
@@ -71,8 +79,9 @@ show_help() {
     echo "Usage: ./scripts/conductor [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  (none)      Start full stack (db + chrome + tui)"
+    echo "  (none)      Start full stack with LLM mode (db + chrome + tui)"
     echo "  --tui       Just start TUI (assumes db/chrome running)"
+    echo "  --simple    Use rule-based mode instead of LLM"
     echo "  --stop      Stop everything"
     echo "  --help      Show this help"
     echo ""
@@ -83,10 +92,19 @@ show_help() {
     echo "  Enter       Queue message"
     echo "  Ctrl+Enter  Send immediately"
     echo "  Q           Quit"
+    echo ""
+    echo "Reasoning log: logs/conductor_reasoning.log"
 }
 
 case "${1:-}" in
     --tui)
+        start_tui
+        ;;
+    --simple)
+        LLM_CONDUCTOR=0
+        log "Starting Neural Music Conductor (Rule-based)..."
+        start_db
+        start_chrome
         start_tui
         ;;
     --stop)
@@ -96,7 +114,7 @@ case "${1:-}" in
         show_help
         ;;
     "")
-        log "Starting Neural Music Conductor..."
+        log "Starting Neural Music Conductor (LLM Mode)..."
         start_db
         start_chrome
         start_tui

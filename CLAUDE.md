@@ -11,6 +11,10 @@ This is a Python project for processing and analyzing real-time EEG (brainwave) 
 ```
 MindMonitorPython/
 ├── consciousness_monitor/     # Main analysis package (modular architecture)
+├── admin/                     # Streamlit admin panel
+│   ├── app.py                # Main entry point
+│   ├── pages/                # Multi-page UI
+│   └── utils/                # Database utilities
 ├── scripts/                   # OSC receivers and utilities
 │   ├── osc_receiver.py       # Main OSC data receiver
 │   ├── osc_receiver_audio.py # With audio feedback
@@ -23,14 +27,41 @@ MindMonitorPython/
 ├── docker/                    # Docker configuration
 │   ├── docker-compose.osc.yml
 │   ├── Dockerfile.osc
+│   ├── Dockerfile.admin      # Admin panel container
 │   ├── compose.yml
 │   └── Dockerfile
 ├── tools/                     # Data ingestion tools
 ├── config/                    # External configuration files
 ├── assets/                    # Media files (sounds, images)
 ├── archive/                   # Legacy/backup scripts (gitignored)
+├── specs/                     # Boundary specifications (CSV)
 └── sql/                       # Database schemas
 ```
+
+## Development Workflow
+
+### Specs-First Development
+
+Before modifying boundaries, adding features, or changing component interfaces:
+
+1. **Update specs first** - Edit `specs/boundary_specs.csv` to add/modify the component row
+2. **Mark as provisional** - Add `[PROVISIONAL]` prefix to the Notes column
+3. **Implement the change** - Write the code, tests, and documentation
+4. **Verify and finalize** - Remove `[PROVISIONAL]` once implementation is complete and tested
+
+Example workflow for adding a new detection pattern:
+```
+1. Add row to boundary_specs.csv:
+   NewPattern,consciousness_monitor/detection/new.py,class,detection,...,[PROVISIONAL] Adding new pattern
+
+2. Implement the pattern in code
+
+3. Add tests
+
+4. Update Notes column to remove [PROVISIONAL]
+```
+
+This ensures architectural decisions are documented before implementation and prevents undocumented boundary changes.
 
 ## Development Commands
 
@@ -257,6 +288,35 @@ The MCP server exposes real-time EEG state to Claude Desktop, enabling attention
 DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" \
   uv run python scripts/eeg_mcp_server.py --test
 ```
+
+## EEG Admin Panel (Streamlit)
+
+A web-based admin panel for viewing brain states, managing labels, and monitoring EEG data.
+
+**Features:**
+- **Dashboard** - Real-time brain state visualization with band power charts
+- **Sessions** - Browse recording sessions, view statistics, export data
+- **Annotations** - Add/view/delete labels on EEG data
+- **State Definitions** - Create custom brain state patterns with thresholds
+- **Baselines** - Save and compare personal EEG baselines
+
+**Running the Admin Panel:**
+
+```bash
+# Direct (recommended for development)
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" \
+  uv run streamlit run admin/app.py --server.headless=true
+
+# Access at http://localhost:8501
+
+# With Docker
+docker compose -f docker/compose.yml up -d admin
+```
+
+**Files:**
+- `admin/app.py` - Main entry point
+- `admin/pages/` - Multi-page UI (Dashboard, Sessions, Annotations, etc.)
+- `admin/utils/db.py` - Database utilities
 
 ## Data Format Detection
 

@@ -171,7 +171,7 @@ def get_recommendations(state: str, cognitive_load: str) -> list:
 
 
 @mcp.tool()
-def get_current_eeg_state() -> dict:
+def get_current_eeg_state(window_seconds: int = 10) -> dict:
     """
     Get the user's current EEG consciousness state and brain wave patterns.
 
@@ -179,32 +179,39 @@ def get_current_eeg_state() -> dict:
     relative band powers (alpha, beta, delta, theta, gamma as percentages),
     and interpretation/recommendations for how to interact.
 
+    Uses a rolling average over the specified window to smooth out noise.
+
+    Args:
+        window_seconds: Seconds of data to average (default: 20, range: 5-60)
+
     Use this to understand the user's current cognitive/emotional state
     and adapt your responses accordingly.
     """
+    window_seconds = min(max(5, window_seconds), 60)  # Clamp to 5-60 seconds
+
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Get most recent window
+        # Get rolling average over the window period
         cur.execute("""
             SELECT
-                ts_start,
-                features->>'state' as state,
-                alpha_rel,
-                beta_rel,
-                delta_rel,
-                theta_rel,
-                gamma_rel
+                MAX(ts_start) as ts_start,
+                AVG(alpha_rel) as alpha_rel,
+                AVG(beta_rel) as beta_rel,
+                AVG(delta_rel) as delta_rel,
+                AVG(theta_rel) as theta_rel,
+                AVG(gamma_rel) as gamma_rel,
+                COUNT(*) as sample_count,
+                MODE() WITHIN GROUP (ORDER BY features->>'state') as dominant_state
             FROM eeg_window
-            ORDER BY ts_start DESC
-            LIMIT 1
-        """)
+            WHERE ts_start > NOW() - INTERVAL '%s seconds'
+        """, (window_seconds,))
 
         row = cur.fetchone()
         conn.close()
 
-        if not row:
+        if not row or row['sample_count'] == 0:
             return {
                 "status": "no_data",
                 "message": "No EEG data available. User may not be wearing headband."
@@ -216,12 +223,13 @@ def get_current_eeg_state() -> dict:
             ts = ts.replace(tzinfo=timezone.utc)
         age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
 
-        db_state = row['state'] or "UNKNOWN"
+        db_state = row['dominant_state'] or "UNKNOWN"
         alpha = float(row['alpha_rel'] or 0)
         beta = float(row['beta_rel'] or 0)
         delta = float(row['delta_rel'] or 0)
         theta = float(row['theta_rel'] or 0)
         gamma = float(row['gamma_rel'] or 0)
+        sample_count = int(row['sample_count'])
 
         # Check custom states FIRST (dynamic, no restart needed)
         percentages = {'alpha': alpha, 'beta': beta, 'delta': delta, 'theta': theta, 'gamma': gamma}
@@ -238,6 +246,8 @@ def get_current_eeg_state() -> dict:
                 "timestamp": to_chicago(ts),
                 "data_age_seconds": round(age_seconds, 1),
                 "is_fresh": age_seconds < 10,
+                "window_seconds": window_seconds,
+                "samples_averaged": sample_count,
                 "state": state,
                 "state_source": "custom",  # Indicates dynamic custom state
                 "band_powers": {
@@ -253,7 +263,7 @@ def get_current_eeg_state() -> dict:
                 "recommendations": custom_recommendations
             }
 
-        # Fall back to pre-computed state from DB
+        # Fall back to dominant state from window
         state = db_state
         interpretation = interpret_state(state, alpha, beta, delta, theta)
 
@@ -262,8 +272,10 @@ def get_current_eeg_state() -> dict:
             "timestamp": to_chicago(ts),
             "data_age_seconds": round(age_seconds, 1),
             "is_fresh": age_seconds < 10,
+            "window_seconds": window_seconds,
+            "samples_averaged": sample_count,
             "state": state,
-            "state_source": "hardcoded",  # Pre-computed by osc_receiver
+            "state_source": "dominant_in_window",  # Most common state in the rolling window
             "band_powers": {
                 "alpha": round(alpha, 1),
                 "beta": round(beta, 1),

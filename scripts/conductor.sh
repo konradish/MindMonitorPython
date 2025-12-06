@@ -15,6 +15,7 @@
 set -e
 
 # Configuration
+CLAUDE_BIN="/home/kodell/.claude/local/claude"
 INTERVAL=${INTERVAL:-10}
 SESSION_FILE="/tmp/conductor_session.json"
 LOG_FILE="/tmp/conductor.log"
@@ -43,29 +44,50 @@ done
 # Initialize session state
 init_session() {
     if [ ! -f "$SESSION_FILE" ]; then
-        echo '{"last_states": [], "current_pattern": "none", "last_change": 0, "iteration": 0}' > "$SESSION_FILE"
+        echo '{"last_states": [], "current_pattern": "none", "pattern_name": "none", "patterns_played": [], "patterns_generated": [], "last_change": 0, "iteration": 0}' > "$SESSION_FILE"
         echo "[$(date -Iseconds)] Session initialized" >> "$LOG_FILE"
     fi
 }
 
+# Beats library
+BEATS_LIBRARY="/mnt/c/projects/MindMonitorPython/config/beats-library.yaml"
+
 # Main conductor prompt
 CONDUCTOR_PROMPT='You are the Neural Music Conductor. Be CONCISE - output only essential info.
 
-1. Call get_current_eeg_state(window_seconds=10) to read current brain state
-2. Read session file: '"$SESSION_FILE"'
-3. Decide if music should change based on:
+## Tools & Files
+- EEG: get_current_eeg_state(window_seconds=10)
+- Session: '"$SESSION_FILE"'
+- Beats library: '"$BEATS_LIBRARY"' (read patterns by mood, add new ones)
+- Pattern file: '"$PATTERN_FILE"'
+
+## Decision Flow
+1. Read EEG state and session file
+2. Check if music should change:
    - State different from last 2 reads → change
-   - Same K_HIGH_LOAD for 3+ reads → definitely change to grounding
-   - No change needed → just report state, do nothing
+   - Same K_HIGH_LOAD for 3+ reads → definitely grounding
+   - User might want variety → pick different pattern from library for same mood
+   - No change needed → just report, do nothing
 
-4. If changing music:
-   - Look up pattern from config/strudel-patterns.yaml for the detected state
-   - Write ONLY the pattern (single line) to: '"$PATTERN_FILE"'
-   - Run: powershell.exe -Command "cd '"$CHROME_AUTO"'; $env:CDP_PORT=\"9223\"; node scripts/run-automation.mjs strudel-play-file.mjs pattern.txt"
-   - Update session file with new state
+3. If changing music:
+   a. Read beats-library.yaml, find patterns matching state moods
+   b. EITHER pick existing pattern OR generate a new one (variety!)
+   c. If generating: create single-line Strudel pattern using sawtooth/sine/triangle synths
+   d. Write pattern to: '"$PATTERN_FILE"'
+   e. Run: powershell.exe -Command "cd '"$CHROME_AUTO"'; $env:CDP_PORT=\"9223\"; node scripts/run-automation.mjs strudel-play-file.mjs pattern.txt"
+   f. Update session with: state, pattern_name, last 3 states
 
-5. Output format (one line):
-   STATE: [state] | ACTION: [none|changed to X] | BANDS: a=[alpha]% b=[beta]%'
+4. If you generate a great new pattern:
+   - Add it to beats-library.yaml under appropriate section
+   - Give it a descriptive name and mood tags
+
+## Pattern Rules
+- Single line only (PowerShell compatibility)
+- Use: sawtooth, sine, triangle, RolandTR808, RolandTR909
+- NO: GM soundfonts, multiline, special chars
+
+## Output (one line):
+STATE: [state] | ACTION: [none|played:pattern_name|generated:name] | BANDS: a=[alpha]% b=[beta]%'
 
 # Run one iteration
 run_iteration() {
@@ -80,10 +102,10 @@ run_iteration() {
     if [ "$DRY_RUN" = true ]; then
         echo "[DRY RUN] Would invoke Claude with conductor prompt"
         # Just read EEG state without changing anything
-        claude --print -p "Call get_current_eeg_state() and report: STATE: [state] | BANDS: a=[alpha]% b=[beta]% | FRESH: [yes/no]" 2>&1
+        "$CLAUDE_BIN" --print -p "Call get_current_eeg_state() and report: STATE: [state] | BANDS: a=[alpha]% b=[beta]% | FRESH: [yes/no]" 2>&1
     else
         # Invoke Claude with full conductor prompt
-        claude --print --dangerously-skip-permissions -p "$CONDUCTOR_PROMPT" 2>&1 | tee -a "$LOG_FILE"
+        "$CLAUDE_BIN" --print --dangerously-skip-permissions -p "$CONDUCTOR_PROMPT" 2>&1 | tee -a "$LOG_FILE"
     fi
 
     # Update iteration count

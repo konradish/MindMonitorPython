@@ -65,51 +65,49 @@ States defined in TimescaleDB `state_definition` table:
 3. **FADE transitions** - use `.slow()`, gradual filter sweeps, tempo glide
 4. **Log reasoning** before each change (written to session annotation)
 
+## Beats Library
+
+The conductor maintains a curated library of patterns at `config/beats-library.yaml`.
+
+### Library Structure
+```yaml
+library:
+  pattern_name:
+    pattern: 'single-line Strudel code'
+    moods: [grounding, minimal, etc]
+    source: original|generated|web
+    notes: "Description"
+
+mood_state_map:
+  K_HIGH_LOAD: [grounding, minimal, calming]
+  K_FLOW: [flow, warm, chill]
+  # etc...
+```
+
+### Pattern Selection
+1. Conductor reads EEG state
+2. Maps state to moods via `mood_state_map`
+3. Selects pattern with matching moods
+4. Can generate new patterns for variety
+5. Saves good generated patterns to library
+
+### Pattern Rules
+- **Single-line only** (PowerShell compatibility)
+- **Use:** `sawtooth`, `sine`, `triangle`, `RolandTR808`, `RolandTR909`
+- **Avoid:** GM soundfonts (unreliable loading), multiline, special chars
+
 ## Musical Mappings
 
-**Note:** Patterns must be single-line for PowerShell compatibility.
+Core patterns from the library:
 
-### K_FLOW (engaged, sustainable)
-**Goal:** Warm, spacious, supportive without demanding attention
-
-```javascript
-stack(note("<C3 G3 Eb3 Bb2>/4").s("sawtooth").lpf(600).room(0.8).gain(0.4), s("~ hh*4").gain(0.2).lpf(800), note("c2 g1").s("sine").slow(2).gain(0.5))
-```
-
-### K_PLAYING (creative, loose)
-**Goal:** Playful, surprising, room for exploration
-
-```javascript
-stack(s("bd [~ bd] ~ bd, ~ sd ~ [sd sd]").bank("RolandTR808"), note("<[c4 e4] [g4 b4] [a4 f4]>*2").s("triangle").delay(0.3).room(0.5), s("arpy*8").n(irand(12)).gain(0.3))
-```
-
-### K_DOWNSHIFT (settling, ambient)
-**Goal:** Slow evolution, gentle landing
-
-```javascript
-stack(note("<Dm Am F Em>/4").s("sawtooth").lpf(500).room(0.9).gain(0.4), s("~ rim").slow(4).gain(0.15).room(0.8), note("d1").s("sine").decay(4).sustain(0.1).lpf(200)).slow(2)
-```
-
-### K_HIGH_LOAD (overwhelmed, grounding needed)
-**Goal:** Sparse, slow, grounding - reduce complexity immediately
-
-```javascript
-stack(s("bd").slow(2).gain(0.6).lpf(100), note("c1").s("sine").decay(2).sustain(0).slow(4))
-```
-
-### K_THINKING (focused cognition)
-**Goal:** Rhythmic structure that supports without distracting
-
-```javascript
-stack(s("bd*4, ~ sd ~ sd, hh*8").bank("RolandTR909").gain(0.5), note("<c3 g2 c3 g2>/2").s("sawtooth").lpf(400)).lpf(sine.range(800,2000).slow(16))
-```
-
-### K_MUSICAL_CHILLS (peak experience)
-**Goal:** Enhance the moment - soaring, expansive
-
-```javascript
-stack(note("<Cm Am Fm Gm>/2").s("sawtooth").lpf(900).room(0.9).gain(0.5), note("c4 g4 eb5 g5").s("triangle").slow(2).delay(0.3).gain(0.4))
-```
+| State | Goal | Moods |
+|-------|------|-------|
+| K_FLOW | Warm, spacious, supportive | flow, warm, chill |
+| K_PLAYING | Playful, room for exploration | playful, creative, funky |
+| K_DOWNSHIFT | Slow evolution, gentle landing | ambient, settling, peaceful |
+| K_HIGH_LOAD | Sparse, grounding, reduce complexity | grounding, minimal |
+| K_THINKING | Rhythmic structure, focus support | focus, steady, rhythmic |
+| K_MUSICAL_CHILLS | Enhance peak experience | peak, soaring, emotional |
 
 ## Strudel Pattern Techniques
 

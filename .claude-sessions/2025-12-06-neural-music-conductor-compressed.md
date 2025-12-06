@@ -87,3 +87,82 @@ Set up proof of concept for neural music conductor: EEG brain states from Muse h
 - Files created: `chrome-automation/strudel-play-file.mjs`, `chrome-automation/take-screenshot.mjs`, `scripts/strudel-play.sh`
 - Packages installed: `@williamzujkowski/strudel-mcp-server@2.2.0`, Playwright Chromium
 - Chrome: Running on port 9223 with strudel.cc loaded
+
+---
+
+# Part 2: Conductor Automation & Beats Library - 2025-12-06 (continued)
+
+## Context
+Continuation session implementing the P1 feature ideas from Part 1: conductor.sh script, pattern library, and then extending to a full beats library with generation capabilities.
+
+## Mistakes Are Learnings (Read This First)
+
+**Key mistakes in this session**:
+1. **GM soundfonts don't load reliably**: Used `gm_pad_choir` and `gm_acoustic_bass` in patterns → No sound output, only saw visual animation → Use basic synths (sawtooth, sine, triangle) instead
+2. **Audio context suspended after idle**: Pattern was animating but no sound → Browser suspends AudioContext after period of inactivity → Need to click body to re-enable, created `strudel-restart-audio.mjs`
+3. **`claude` command not found in bash script**: Used `claude` without full path → Script failed → Use `/home/kodell/.claude/local/claude` in scripts
+4. **Strudel MCP browser closed**: Tried pattern generation via mcp__strudel__ tools → "Target page, context or browser has been closed" → Strudel MCP browser instance separate from Windows Chrome
+
+**Time wasted**: ~10 minutes debugging silent patterns (GM soundfonts). Could have been prevented by sticking to basic synths from the start.
+
+## Decisions
+- **Beats library over pattern library**: Extended from simple state→pattern mapping to full library with mood tags, allowing multiple patterns per state
+- **Mood-based selection**: States map to moods, moods match patterns. Enables variety within same brain state.
+- **Pattern generation capability**: Conductor can generate new patterns (using basic synth rules) and save to library
+- **Synth restrictions**: Only use `sawtooth`, `sine`, `triangle`, `RolandTR808`, `RolandTR909`. No GM soundfonts.
+
+## Implementation
+- Created `config/strudel-patterns.yaml`: Simple state→pattern mapping (original P1 goal)
+- Created `config/beats-library.yaml`: Extended library with 20 patterns, mood tags, source tracking, state-mood mapping
+- Created `scripts/conductor.sh`: 10-second loop invoking Claude CLI with conductor prompt, session state tracking
+- Updated `docs/conductor.md`: Added Beats Library section, simplified Musical Mappings to table format
+- Created `chrome-automation/strudel-restart-audio.mjs`: Re-enables audio context after browser idle
+
+## Lessons
+- ✅ Claude CLI invocation every 10s works reliably as "conductor loop"
+- ✅ Session state file (`/tmp/conductor_session.json`) persists pattern history
+- ✅ Full EEG→decision→Strudel pipeline works in auto mode
+- ✅ All 6 K_* patterns tested and playing
+- ❌ GM soundfonts don't load (samples fail to fetch)
+- ❌ Strudel MCP uses separate browser, can't share with Windows Chrome
+- 💡 Mood-based pattern selection provides variety without complexity
+- 💡 File-based everything (patterns, session state) avoids shell escaping nightmares
+
+## Mistakes & Efficiency Improvements
+
+### Tool Call Failures & Inefficiencies
+
+| Tool | Issue | Better Approach |
+|------|-------|-----------------|
+| mcp__strudel__generate_pattern | "browser closed" error | Strudel MCP is separate browser, use Claude to generate patterns directly |
+| mcp__strudel__generate_drums | Same browser error | Don't mix MCP tools with Windows Chrome approach |
+| Bash (conductor.sh) | `claude: command not found` | Use full path `/home/kodell/.claude/local/claude` |
+
+**Wasted tool calls:** 3 Strudel MCP generation calls that failed (browser closed)
+
+### AI Agent Mistakes
+1. **Used GM soundfonts in patterns**: Assumed Strudel samples would load like built-in synths → User heard nothing → Should have stuck to proven synths from test patterns
+
+## .claude Improvements
+
+### REFERENCE.md
+- [ ] Add Strudel synth restrictions: "Only sawtooth, sine, triangle, RolandTR808, RolandTR909. GM soundfonts unreliable."
+- [ ] Document conductor.sh pattern: "Claude CLI invoked every N seconds for quasi-realtime response"
+
+## Project Enhancements (Code-Level Work)
+
+### Feature Ideas (from this session)
+- [x] **Conductor loop script**: DONE - `scripts/conductor.sh`
+- [x] **Pattern library file**: DONE - `config/strudel-patterns.yaml` and `config/beats-library.yaml`
+- [ ] **Web pattern discovery**: Conductor could search for new patterns online - Priority: P2
+- [ ] **Pattern effectiveness tracking**: Log which patterns correlate with positive state transitions - Priority: P2
+
+### Testing Gaps
+- [ ] Validate Strudel pattern syntax before sending to browser
+- [ ] Test conductor.sh with simulated EEG data
+
+## Artifacts (Part 2)
+- Files created: `config/beats-library.yaml`, `scripts/conductor.sh`, `chrome-automation/strudel-restart-audio.mjs`
+- Files modified: `docs/conductor.md`, `config/strudel-patterns.yaml`
+- Session state: `/tmp/conductor_session.json`
+- Conductor auto-mode tested and working (K_THINKING → K_PLAYING transition observed)

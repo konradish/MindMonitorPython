@@ -1,16 +1,25 @@
 # Neural Music Conductor
 
-Real-time music conductor responding to EEG neural states via Claude Code CLI.
+Real-time music conductor responding to EEG neural states.
+
+## Quick Start
+
+```bash
+./scripts/conductor
+```
+
+That's it. This starts the database, launches Chrome with Strudel, and opens the TUI.
 
 ## Architecture
 
 ```
-Phone (Mind Monitor) → OSC → TimescaleDB → EEG MCP → Claude Code CLI → Windows Chrome → strudel.cc
-                                                          ↑
-                                              conductor.sh (10s loop)
+Phone (Mind Monitor) → OSC → TimescaleDB → Conductor TUI → Windows Chrome → strudel.cc
+                                                ↓
+                                    [Space] Pause  [N] Next  [R] Regen
+                                    [Enter] Queue msg  [Ctrl+Enter] Send now
 ```
 
-**Execution Model:** Claude Code is invoked every 10 seconds by an external shell script. Each invocation reads the current EEG state and decides whether to evolve the music.
+**Execution Model:** The TUI polls EEG state every 3 seconds and automatically selects patterns from the beats library. You can interject messages at any time.
 
 **Why Windows Chrome?** WSL2 audio routing is poor quality. Using native Windows Chrome via CDP (Chrome DevTools Protocol) gives proper audio output.
 
@@ -142,57 +151,163 @@ setcps(saw.range(0.3, 0.6).slow(32))
 .rarely(fn)       // occasional variation
 ```
 
+## Example: Full Track with Vocals
+
+ATB - 9pm (Till I Come) recreation demonstrating samples, chord progressions, and arrangement:
+
+```javascript
+// ATB - 9pm (Till I Come) - CORRECTED from XM analysis
+// BPM: 140, Key: A minor, Progression: Am - Am - Dm - F
+const bpm = 140
+
+samples({
+  tillIcome: 'https://raw.githubusercontent.com/konradish/music/main/till%20i%20come.wav',
+  changeIt: 'https://raw.githubusercontent.com/konradish/music/main/change%20it%20and%20say.wav'
+})
+
+stack(
+  // === SUB BASS DRONE ===
+  note("a0")
+    .s("sawtooth")
+    .lpf(120)
+    .gain(0.12),
+
+  // === 16TH NOTE ARPEGGIO (C5+C6 octave pulse) ===
+  note("<[c5,c6] [c5,c6] [d5,d6] [f5,f6]>/4")
+    .s("sawtooth")
+    .lpf(2000)
+    .gain(0.08)
+    .struct("1*16"),
+
+  // === LEAD (Kurtis transcription) ===
+  note(`[
+    ~ a4 a4 b4 a4
+    ~ c5 ~ c5 ~ c5 e5 d5
+    f4@2 ~ f4 g4 a4 g4
+    ~ a4 ~ c5 ~ c5 d5 c5
+    g4@3
+  ]/6`)
+    .s("sawtooth")
+    .lpf(4500)
+    .delay(0.4).dfb(0.55).dt(60/bpm/2)
+    .room(0.2)
+    .gain(0.18)
+    .mask("<0 0 0 1 1 1>".slow(6)),
+
+  // === PAD - CORRECT PROGRESSION: Am Am Dm F ===
+  note("<[a3,c4,e4] [a3,c4,e4] [d4,f4,a4] [f4,a4,c5]>/6")
+    .s("gm_pad_choir")
+    .lpf(1200)
+    .room(0.5)
+    .gain(0.05),
+
+  // === BASS (follows chord roots) ===
+  note("<a1 a1 d2 f1>/6")
+    .s("sawtooth")
+    .lpf(500)
+    .gain(0.1)
+    .mask("<0 1 1 1 1 0>".slow(6)),
+
+  // === KICK ===
+  s("bd*4").bank("RolandTR909").gain(0.16)
+    .mask("<0 0 1 1 1 0>".slow(6)),
+
+  // === CLAP ===
+  s("~ cp ~ cp").bank("RolandTR909").room(0.25).gain(0.08)
+    .mask("<0 0 1 1 1 0>".slow(6)),
+
+  // === HATS ===
+  s("hh*8").bank("RolandTR909").gain(0.05)
+    .mask("<0 0 0 0 1 0>".slow(6)),
+
+  // === VOCALS ===
+  s("tillIcome")
+    .struct("[1 ~ ~ ~] [~ ~ 1 ~] [~ ~ ~ ~] [1 ~ ~ ~]")
+    .slow(4)
+    .gain(0.3),
+
+  s("changeIt")
+    .struct("[~ ~ ~ ~] [~ ~ ~ ~] [~ 1 ~ ~] [~ ~ ~ ~]")
+    .slow(4)
+    .gain(0.3)
+
+).gain(0.35).cpm(bpm/4)
+```
+
+**Key techniques:**
+- `samples({...})` - Load external wav files
+- `mask("<0 0 1 1 1 0>".slow(6))` - Arrangement automation (6-bar cycle)
+- `struct("1*16")` - Force 16th note rhythm
+- `note("<...>/6")` - Distribute chord progression over 6 bars
+- `.dt(60/bpm/2)` - Tempo-synced delay (8th notes)
+
 ## Execution
 
-### Starting a Session
+### One Command Start
 
 ```bash
-# Terminal 1: EEG pipeline
-docker compose -f docker/compose.yml up -d db
-DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" uv run python scripts/osc_receiver.py
-
-# Terminal 2: Launch Windows Chrome with Strudel
-powershell.exe -Command "cd C:\projects\prompt-kit\chrome-automation; node scripts/chrome-launcher.mjs --profile=default 'https://strudel.cc'"
-
-# Terminal 3: Claude Code (manual conductor mode)
-claude
+./scripts/conductor
 ```
 
-### Manual Conductor Mode
+This handles everything:
+1. Starts the database (if not running)
+2. Launches Chrome with Strudel
+3. Opens the TUI
 
-In Claude Code, say things like:
+**Other options:**
+```bash
+./scripts/conductor --tui    # Just TUI (db/chrome already running)
+./scripts/conductor --stop   # Stop everything
+./scripts/conductor --help   # Show help
+```
+
+### Prerequisites (separate terminal)
+
+The OSC receiver must be running to get EEG data:
+```bash
+DATABASE_URL="postgresql://eeg:eegpass@localhost:5590/eeg" uv run python scripts/osc_receiver.py
+```
+
+### TUI Layout
+```
++------------------+------------------+
+| Brain State      | Current Pattern  |
+| K_FLOW    LIVE   | flow_warm_groove |
+| a Alpha ###----- | Moods: flow,warm |
+| b Beta  ##------ | Duration: 2:30   |
+| ...              | [Space] [N] [R]  |
++------------------+------------------+
+| State History (5 min)              |
+| K_FLOW(12) -> K_THINKING(3) -> ... |
++------------------------------------+
+| Log                                |
+| 14:32:01 Playing: flow_warm_groove |
++------------------------------------+
+| > Type message here (Enter/Ctrl+E) |
++------------------------------------+
+```
+
+**Keybindings:**
+| Key | Action |
+|-----|--------|
+| `Space` | Pause/resume conductor |
+| `N` | Force next pattern |
+| `R` | Regenerate (different pattern) |
+| `Enter` | Queue message for next cycle |
+| `Ctrl+Enter` | Send message immediately |
+| `Q` | Quit |
+
+**Interjection Examples:**
+- "this is too repetitive" - triggers pattern change
+- "something more complex" - increases complexity
+- "calmer please" - shifts to grounding patterns
+
+### Alternative: Claude Code Mode
+
+You can also use Claude Code directly for manual control:
 - "Read my brain state and play matching music"
 - "I'm in K_FLOW, play something warm and spacious"
-- "Check my EEG and evolve the music"
 - "I'm feeling overwhelmed, switch to K_HIGH_LOAD pattern"
-
-### Automated Conductor Script (`scripts/conductor.sh`)
-
-```bash
-#!/bin/bash
-# Neural Music Conductor - invokes Claude Code every 10 seconds
-
-SESSION_FILE="/tmp/conductor_session.json"
-
-# Initialize session state
-if [ ! -f "$SESSION_FILE" ]; then
-    echo '{"last_states": [], "current_pattern": "none"}' > "$SESSION_FILE"
-fi
-
-while true; do
-    claude --print --dangerously-skip-permissions \
-        -p "You are the Neural Music Conductor.
-            1. Read EEG via get_current_eeg_state()
-            2. Check session at $SESSION_FILE for last states
-            3. If state changed significantly, write new pattern to /mnt/c/projects/prompt-kit/chrome-automation/pattern.txt
-            4. Run: powershell.exe -Command \"cd C:\\projects\\prompt-kit\\chrome-automation; \\\$env:CDP_PORT='9223'; node scripts/run-automation.mjs strudel-play-file.mjs pattern.txt\"
-            5. Update session file
-            Be concise. Single-line Strudel patterns only." \
-        2>&1 | tee -a /tmp/conductor.log
-
-    sleep 10
-done
-```
 
 ## Testing
 

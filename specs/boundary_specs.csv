@@ -1,0 +1,64 @@
+Component,File Path,Type,Layer,Responsibility,Dependencies,Side Effects,Boundary Type,Related Tests,Notes
+EnhancedConsciousnessMonitor,consciousness_monitor/main.py,class,orchestrator,Central orchestrator coordinating all analysis components,"RuleManager, ArtifactThresholds, Settings, DataParser, SignalProcessor, DetectionEngine, DisplayManager, CommandInterface, ReportGenerator, TimescaleSink","DB (TimescaleDB), File (CSV read), UI (terminal)",Internal API,test_enhanced_monitor.py; test_refactored_monitor.py; test_therapeutic_patterns.py,Main entry point for all analysis
+DataParser,consciousness_monitor/data/parsers.py,class,data,Parse EEG CSV formats (Mind Monitor/Muse Player/OSC),"pandas, numpy, Settings",File (CSV read),Internal API,test_mindmonitor_approach.py,Detects format from headers
+SignalProcessor,consciousness_monitor/data/processors.py,class,data,EEG signal processing and FFT band power calculation,"scipy.signal, numpy, BandPower",None,Internal API,test_signal_processing.py,Welch power spectral density
+EEGReading,consciousness_monitor/data/models.py,dataclass,data,Single EEG reading with all channels,None,None,Data Contract,,Immutable data structure
+BandPower,consciousness_monitor/data/models.py,dataclass,data,Frequency band power values (delta/theta/alpha/beta/gamma),None,None,Data Contract,,Used throughout detection layer
+AnalysisResult,consciousness_monitor/data/models.py,dataclass,data,State detection result with insights,None,None,Data Contract,,Output of DetectionEngine
+DetectionEngine,consciousness_monitor/detection/engine.py,class,detection,Core pattern matching engine for consciousness states,"RuleManager, ArtifactThresholds, ArtifactFilter, SubStateDetector, TherapeuticPatterns, psycopg2","DB (query state_definition, 30s TTL cache)",Internal API,test_mindmonitor_approach.py; test_excitement_detection.py,Loads custom states from database
+ArtifactFilter,consciousness_monitor/detection/artifacts.py,class,detection,Detect EEG artifacts (noise/sensor disconnect),"ArtifactThresholds, numpy",None,Internal API,,Multi-band spikes and impossible combos
+TherapeuticPatterns,consciousness_monitor/detection/patterns.py,class,detection,Detect therapeutic patterns (IFS parts/meditation/ANS),"RuleManager, collections.deque",None,Internal API,test_therapeutic_patterns.py,Young Part/Cautious Part/Hopeful Part detection
+SubStateDetector,consciousness_monitor/detection/sub_states.py,class,detection,Detect hierarchical sub-states within base states,None,None,Internal API,,Flow:Engaged/Absorbed; Jhana:Entry/Stable
+RuleManager,consciousness_monitor/config/rules.py,class,config,Load and manage detection rules from JSON,"json, os",File (JSON read),Configuration API,,detection_rules.json; sub_states.json; konrad_personalized.json
+ArtifactThresholds,consciousness_monitor/config/thresholds.py,class,config,Manage artifact detection thresholds,"json, os",File (JSON read),Configuration API,,artifact_thresholds.json
+Settings,consciousness_monitor/config/settings.py,class,config,Global configuration (EEG bands/sample rates/columns),None,None,Configuration API,,EEGBands and DataColumns dataclasses
+DisplayManager,consciousness_monitor/ui/display.py,class,ui,Terminal display and visualization,"colorama, AnalysisResult",UI (terminal print),Output API,,Colored output with progress bars
+CommandInterface,consciousness_monitor/ui/commands.py,class,ui,Interactive command handling during monitoring,"threading, queue, keyboard, pyperclip","Threading (daemon), Clipboard (write)",Input API,,Commands: c=copy; s=summary; n=force; q=quit
+ReportGenerator,consciousness_monitor/ui/reports.py,class,ui,Generate session reports and summaries,"datetime, json, AnalysisResult",File (JSON export optional),Output API,,Session tracking and therapeutic reports
+TimescaleSink,consciousness_monitor/sinks/timescale_sink.py,class,sink,Write analysis results to TimescaleDB,"psycopg2, json, os",DB (INSERT to eeg_window and detection),External API,,Batches 500 rows; 3 retry attempts
+MathHelpers,consciousness_monitor/utils/math_helpers.py,class,utils,Mathematical operations for EEG analysis,None,None,Internal Utility,,power_to_db; normalize_band_powers; moving_average
+spectral_features,consciousness_monitor/analysis/spectral_features.py,module,analysis,Advanced spectral analysis (entropy/peak instability),"numpy, scipy",None,Internal API,test_spectral_features.py,Shannon entropy of frequency distribution
+gamma_detection,consciousness_monitor/analysis/gamma_detection.py,module,analysis,Gamma band spike detection,None,None,Internal API,test_gamma_detection.py,
+coherence_analysis,consciousness_monitor/analysis/coherence_analysis.py,module,analysis,Inter-channel coherence analysis,"scipy.signal, numpy",None,Internal API,test_coherence_analysis.py,
+osc_receiver.py,scripts/osc_receiver.py,script,network,Main OSC server receiving Mind Monitor data,"python-osc, numpy, scipy, TimescaleSink, SignalProcessor, DetectionEngine, psycopg2","Network (UDP 0.0.0.0:5000), File (CSV write), DB (auto-start)",External Network API,,Primary data ingestion; /muse/eeg and /muse/elements/*
+osc_receiver_audio.py,scripts/osc_receiver_audio.py,script,network,OSC receiver with audio feedback,"python-osc, audio libraries","Network (UDP), File (CSV), Audio (playback)",External Network API,,Sound on state changes
+osc_receiver_simple.py,scripts/osc_receiver_simple.py,script,network,Minimal OSC receiver without database,python-osc,"Network (UDP), File (CSV)",External Network API,,Simplified version
+udp_forward_to_wsl.py,scripts/udp_forward_to_wsl.py,script,network,Forward UDP from Windows to WSL2 (bridges NAT),"socket, subprocess","Network (UDP forward), Process (wsl exec)",External Network Bridge,,Required for WSL2 because UDP doesn't NAT
+eeg_mcp_server.py,scripts/eeg_mcp_server.py,script,mcp,Expose EEG consciousness state to Claude Desktop,"mcp.server.fastmcp, psycopg2","Network (MCP stdio), DB (read-only queries)",External API (Claude),,Tools: get_current_eeg_state; get_eeg_history; get_session_summary
+mcp-eeg-server,scripts/mcp-eeg-server,shell,mcp,WSL wrapper for Claude Desktop config,uv; eeg_mcp_server.py,Process (shell exec),External API,,Referenced in claude_desktop_config.json
+consciousness_monitor_db_v2.py,scripts/consciousness_monitor_db_v2.py,script,monitoring,Monitor with database mode selection,"EnhancedConsciousnessMonitor, argparse","File (CSV read), DB (write), UI (terminal)",CLI Entry Point,,--db-only mode
+detection_rules.json,consciousness_monitor/config/detection_rules.json,json,config,Consciousness state detection patterns,None,None,Configuration Data,,~250 rules; ~1000 lines
+sub_states.json,consciousness_monitor/config/sub_states.json,json,config,Hierarchical sub-state definitions,None,None,Configuration Data,,~150 rules; ~400 lines
+artifact_thresholds.json,consciousness_monitor/config/artifact_thresholds.json,json,config,Artifact detection thresholds,None,None,Configuration Data,,~10 thresholds; ~50 lines
+konrad_personalized.json,consciousness_monitor/config/konrad_personalized.json,json,config,Konrad's custom detection rules,None,None,Configuration Data,,~60 lines; personalized patterns
+init.sql,sql/init.sql,sql,database,Database schema (tables/hypertables/indexes),None,None,Data Contract,,eeg_window; detection; state_definition; session tables
+compose.yml,docker/compose.yml,yaml,infra,TimescaleDB database container,docker,None,Infrastructure,,Port 5590 exposed
+docker-compose.osc.yml,docker/docker-compose.osc.yml,yaml,infra,OSC receiver container,docker,Network (port 5000),Infrastructure,,Mind Monitor target
+create_session.py,tools/create_session.py,script,tools,Create DB session,psycopg2,DB (INSERT),Tool Script,,
+import_ls_annotations.py,tools/import_ls_annotations.py,script,tools,Import Label Studio annotations,psycopg2,DB (INSERT),Tool Script,,
+gzip_and_register.py,tools/gzip_and_register.py,script,tools,Compress and register files,gzip; psycopg2,"File (gzip), DB (INSERT)",Tool Script,,
+tail_import.py,tools/tail_import.py,script,tools,Import recent data,psycopg2,"File (read), DB (INSERT)",Tool Script,,
+export_downsample.py,tools/export_downsample.py,script,tools,Export downsampled data,psycopg2,File (write),Tool Script,,
+verify_ingestion.py,tools/verify_ingestion.py,script,tools,Verify data ingestion,psycopg2,DB (query),Tool Script,,
+historical_import.py,tools/historical_import.py,script,tools,Batch historical import,psycopg2,"File (read), DB (INSERT)",Tool Script,,
+test_therapeutic_patterns.py,tests/test_therapeutic_patterns.py,test,tests,Test therapeutic state patterns,pytest; consciousness_monitor,None,Test,,All therapeutic patterns
+test_enhanced_monitor.py,tests/test_enhanced_monitor.py,test,tests,Test main orchestrator integration,pytest; consciousness_monitor,None,Test,,EnhancedConsciousnessMonitor
+test_refactored_monitor.py,tests/test_refactored_monitor.py,test,tests,Test modular architecture,pytest; consciousness_monitor,None,Test,,
+test_mindmonitor_approach.py,tests/test_mindmonitor_approach.py,test,tests,Test Mind Monitor format parsing,pytest; consciousness_monitor,None,Test,,Format detection
+test_signal_processing.py,tests/test_signal_processing.py,test,tests,Test FFT and filtering,pytest; consciousness_monitor,None,Test,,SignalProcessor
+test_flow_detection.py,tests/test_flow_detection.py,test,tests,Test flow state sub-states,pytest; consciousness_monitor,None,Test,,
+test_excitement_detection.py,tests/test_excitement_detection.py,test,tests,Test excitement vs anxiety,pytest; consciousness_monitor,None,Test,,
+test_contact_analysis.py,tests/test_contact_analysis.py,test,tests,Test sensor contact quality,pytest; consciousness_monitor,None,Test,,
+test_motion_analysis.py,tests/test_motion_analysis.py,test,tests,Test motion artifact detection,pytest; consciousness_monitor,None,Test,,
+test_band_power_validation.py,tests/test_band_power_validation.py,test,tests,Test band power calculations,pytest; consciousness_monitor,None,Test,,
+test_sample_rate_analysis.py,tests/test_sample_rate_analysis.py,test,tests,Test sample rate detection,pytest; consciousness_monitor,None,Test,,
+test_corrected_sample_rate.py,tests/test_corrected_sample_rate.py,test,tests,Test sample rate correction,pytest; consciousness_monitor,None,Test,,
+test_meditation_validation.py,tests/test_meditation_validation.py,test,tests,Test meditation pattern validation,pytest; consciousness_monitor,None,Test,,
+test_cycle_integration.py,tests/test_cycle_integration.py,test,tests,Test state cycle integration,pytest; consciousness_monitor,None,Test,,
+test_enhanced_features.py,tests/test_enhanced_features.py,test,tests,Test enhanced feature detection,pytest; consciousness_monitor,None,Test,,
+test_force_output.py,tests/test_force_output.py,test,tests,Test display output filtering,pytest; consciousness_monitor,None,Test,,
+test_interval_logic.py,tests/test_interval_logic.py,test,tests,Test output interval timing,pytest; consciousness_monitor,None,Test,,
+test_monitor_output.py,tests/test_monitor_output.py,test,tests,Test monitor output formatting,pytest; consciousness_monitor,None,Test,,
+test_spectral_features.py,consciousness_monitor/tests/test_spectral_features.py,test,tests,Test spectral entropy,pytest,None,Test,,Package-level tests
+test_gamma_detection.py,consciousness_monitor/tests/test_gamma_detection.py,test,tests,Test gamma spike detection,pytest,None,Test,,Package-level tests
+test_coherence_analysis.py,consciousness_monitor/tests/test_coherence_analysis.py,test,tests,Test inter-channel coherence,pytest,None,Test,,Package-level tests

@@ -148,3 +148,6 @@ db_data/
 
 # Conductor reasoning logs
 logs/
+
+# Allow specs CSV
+!specs/*.csv

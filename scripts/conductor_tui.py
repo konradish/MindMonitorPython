@@ -294,16 +294,35 @@ Remember: stability is good, don't change too often unless the state clearly cal
 
 def load_session() -> dict:
     """Load session state from file."""
-    if SESSION_FILE.exists():
-        with open(SESSION_FILE) as f:
-            return json.load(f)
-    return {
+    default_session = {
         "last_states": [],
         "recent_patterns": [],
         "current_pattern": None,
         "pattern_start_time": None,
         "paused": False
     }
+
+    if SESSION_FILE.exists():
+        with open(SESSION_FILE) as f:
+            session = json.load(f)
+
+        # Reset pattern_start_time if it's stale (> 4 hours old)
+        # This handles restarts where the session file persists but music isn't playing
+        start_str = session.get("pattern_start_time")
+        if start_str:
+            try:
+                start = datetime.fromisoformat(start_str)
+                age_hours = (datetime.now() - start).total_seconds() / 3600
+                if age_hours > 4:
+                    # Pattern can't have been playing for 4+ hours, reset
+                    session["pattern_start_time"] = None
+                    session["current_pattern"] = None
+            except (ValueError, TypeError):
+                pass
+
+        return session
+
+    return default_session
 
 
 def save_session(session: dict):
@@ -760,7 +779,18 @@ def reset_terminal():
 
 def main():
     """Run the conductor TUI."""
+    import argparse
     import atexit
+
+    parser = argparse.ArgumentParser(description="Neural Music Conductor TUI")
+    parser.add_argument("--fresh", action="store_true",
+                        help="Start fresh (clear session state)")
+    args = parser.parse_args()
+
+    if args.fresh and SESSION_FILE.exists():
+        SESSION_FILE.unlink()
+        print("Session cleared, starting fresh...")
+
     atexit.register(reset_terminal)
 
     try:

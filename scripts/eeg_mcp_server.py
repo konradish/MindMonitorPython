@@ -1239,8 +1239,8 @@ def create_state_definition(
     """
     Create a new custom EEG state definition.
 
-    Custom states are checked BEFORE hardcoded rules, allowing you to define
-    personalized patterns like "DEEP_WORK" or "K_RELAXED" with specific thresholds.
+    The detection engine uses ONLY custom states. If no custom state matches,
+    the state will be UNKNOWN. Define states for patterns you want to recognize.
 
     Args:
         name: Unique name for this state (e.g., "DEEP_WORK", "CODING_FLOW")
@@ -1253,7 +1253,7 @@ def create_state_definition(
         interpretation: Human-readable explanation of this state
         recommendations: List of communication recommendations
         emoji: Display emoji (default: brain)
-        priority: Higher = checked first (default: 50, hardcoded rules are 1-20)
+        priority: Higher = checked first among custom states (default: 50). First match wins.
         notes: Additional context about this state definition
 
     Example conditions:
@@ -1368,7 +1368,7 @@ def list_state_definitions(include_disabled: bool = False) -> dict:
             "status": "ok",
             "count": len(states),
             "states": states,
-            "note": "Custom states are checked BEFORE hardcoded rules (priority 50 > hardcoded 1-20)"
+            "note": "Only custom states are used for detection. If no state matches, UNKNOWN is returned. Higher priority = checked first."
         }
 
     except Exception as e:

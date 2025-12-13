@@ -67,7 +67,7 @@ with st.expander("➕ Add New State Definition", expanded=False):
                 min_value=1,
                 max_value=100,
                 value=50,
-                help="Higher priority states are checked first (hardcoded rules are 1-20)"
+                help="Higher priority = checked first among custom states. Custom states always beat hardcoded rules."
             )
 
             enabled = st.checkbox("Enabled", value=True)
@@ -244,29 +244,28 @@ else:
     st.info("No custom state definitions yet. Create one above!")
 
 
-# Built-in states reference
-st.subheader("Built-in States Reference")
+# State definition guide
+st.subheader("State Definition Guide")
 
-with st.expander("View built-in state patterns"):
+with st.expander("View common state patterns"):
     st.markdown("""
-    These states are hardcoded in the detection engine (priority 1-20):
+    **The detection engine uses only custom states defined above.**
+    If no custom state matches, the state will be **UNKNOWN**.
 
-    | State | Emoji | Key Patterns |
-    |-------|-------|--------------|
-    | **JHANA/TRANSCENDENT** | ✨ | 80%+ alpha, <15% beta |
-    | **YOUNG_PART_CONNECTED** | 👶 | 35%+ delta, 30-40% alpha |
-    | **HOPEFUL_PART_ACTIVE** | 🌟 | Optimistic consciousness patterns |
-    | **SECURITY_GUARD_ACTIVE** | 🛡️ | Threat detection patterns |
-    | **STARTLED** | 😲 | Healthy startle response |
-    | **FOCUSED** | 🎯 | High beta, moderate alpha |
-    | **RELAXED** | 😌 | High alpha, low beta |
-    | **MEDITATIVE** | 🧘 | Very high alpha, low beta |
-    | **DROWSY** | 😴 | High theta, low beta |
-    | **CREATIVE_FLOW** | 🎨 | Alpha-theta crossover |
-    | **PEAK_FOCUS** | 🔥 | Very high beta |
-    | **ALERT_TENSE** | 😰 | High beta, very low alpha |
+    Here are some common patterns you might want to define:
 
-    Custom states with priority > 20 will be checked **before** these built-in patterns.
+    | State | Emoji | Suggested Conditions |
+    |-------|-------|---------------------|
+    | **RELAXED** | 😌 | alpha_min: 40, beta_max: 25 |
+    | **FOCUSED** | 🎯 | beta_min: 25, alpha_min: 20 |
+    | **MEDITATIVE** | 🧘 | alpha_min: 60, beta_max: 15 |
+    | **DROWSY** | 😴 | theta_min: 30, alpha_max: 30 |
+    | **CREATIVE_FLOW** | 🎨 | alpha_min: 35, theta_min: 20 |
+    | **ALERT** | ⚡ | beta_min: 35, gamma_min: 15 |
+    | **CALM** | 🌊 | alpha_min: 45, beta_max: 20, delta_max: 25 |
+
+    **Priority:** Higher priority states are checked first.
+    The first matching state wins.
     """)
 
 
@@ -309,10 +308,20 @@ if current and current.get('ts_start'):
                 matched.append(state)
 
         if matched:
-            st.success(f"**{len(matched)} state(s) match current brain state:**")
-            for m in matched:
-                st.write(f"{m['emoji']} **{m['name']}** (priority {m['priority']})")
+            # Sort by priority descending to show which would actually win
+            matched.sort(key=lambda x: x['priority'], reverse=True)
+            winner = matched[0]
+
+            st.success(f"**{len(matched)} custom state(s) match current brain state:**")
+            st.markdown(f"**Winner:** {winner['emoji']} **{winner['name']}** (priority {winner['priority']})")
+
+            if len(matched) > 1:
+                st.caption("Other matching states (lower priority, would not trigger):")
+                for m in matched[1:]:
+                    st.write(f"  {m['emoji']} {m['name']} (priority {m['priority']})")
+
+            st.info("💡 The first matching state by priority wins. Define more states to cover different brain patterns.")
         else:
-            st.info("No custom states match the current brain state.")
+            st.warning("No custom states match the current brain state. The detection engine will return **UNKNOWN**.")
 else:
     st.info("No current EEG data available for testing.")

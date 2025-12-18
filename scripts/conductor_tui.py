@@ -15,6 +15,7 @@ import os
 import random
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,7 @@ from zoneinfo import ZoneInfo
 import yaml
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2 import pool
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -38,6 +40,7 @@ CHICAGO_TZ = ZoneInfo("America/Chicago")
 PROJECT_ROOT = Path(__file__).parent.parent
 BEATS_LIBRARY_PATH = PROJECT_ROOT / "config" / "beats-library.yaml"
 CONDUCTOR_PROMPT_PATH = PROJECT_ROOT / "config" / "conductor-prompt.md"
+MUSIC_PREFERENCES_PATH = PROJECT_ROOT / "config" / "music-preferences.yaml"
 PATTERN_FILE = Path("/mnt/c/projects/prompt-kit/chrome-automation/pattern.txt")
 SESSION_FILE = Path("/tmp/conductor_session.json")
 DECISION_FILE = Path("/tmp/conductor_decision.json")
@@ -52,10 +55,61 @@ DATABASE_URL = os.environ.get(
     'postgresql://eeg:eegpass@localhost:5590/eeg'
 )
 
+# Connection pool (initialized lazily)
+_db_pool: Optional[pool.ThreadedConnectionPool] = None
+
+
+def get_db_pool() -> pool.ThreadedConnectionPool:
+    """Get or create the database connection pool."""
+    global _db_pool
+    if _db_pool is None:
+        _db_pool = pool.ThreadedConnectionPool(1, 5, DATABASE_URL)
+    return _db_pool
+
 
 def get_db_connection():
-    """Get database connection."""
-    return psycopg2.connect(DATABASE_URL)
+    """Get database connection from pool."""
+    return get_db_pool().getconn()
+
+
+def release_db_connection(conn):
+    """Return connection to pool."""
+    try:
+        get_db_pool().putconn(conn)
+    except Exception:
+        pass
+
+
+# Chrome CDP settings
+CDP_PORT = os.environ.get('CDP_PORT', '9223')
+CDP_HOST = os.environ.get('CDP_HOST', 'localhost')
+
+
+def check_chrome_cdp(timeout: float = 2.0) -> tuple[bool, str]:
+    """Check if Chrome CDP is available. Returns (success, message)."""
+    import socket
+    try:
+        # Quick socket check first
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((CDP_HOST, int(CDP_PORT)))
+        sock.close()
+        if result != 0:
+            return False, f"Chrome not listening on {CDP_HOST}:{CDP_PORT}"
+        return True, f"Chrome CDP available on port {CDP_PORT}"
+    except Exception as e:
+        return False, str(e)
+
+
+def wait_for_chrome_cdp(max_retries: int = 5, retry_delay: float = 2.0) -> bool:
+    """Wait for Chrome CDP to become available. Returns True if connected."""
+    for attempt in range(max_retries):
+        ok, msg = check_chrome_cdp()
+        if ok:
+            return True
+        if attempt < max_retries - 1:
+            time.sleep(retry_delay)
+    return False
 
 
 def to_chicago(ts) -> str:
@@ -75,57 +129,115 @@ def load_beats_library() -> dict:
         return yaml.safe_load(f)
 
 
+def load_music_preferences() -> dict:
+    """Load music preferences from YAML."""
+    default_prefs = {
+        "likes": [],      # List of {pattern, reason, timestamp}
+        "dislikes": [],   # List of {pattern, reason, timestamp}
+        "notes": [],      # General notes about preferences
+    }
+    if not MUSIC_PREFERENCES_PATH.exists():
+        return default_prefs
+    with open(MUSIC_PREFERENCES_PATH) as f:
+        prefs = yaml.safe_load(f) or {}
+    # Merge with defaults for any missing keys
+    for key in default_prefs:
+        if key not in prefs:
+            prefs[key] = default_prefs[key]
+    return prefs
+
+
+def save_music_preferences(prefs: dict) -> None:
+    """Save music preferences to YAML."""
+    MUSIC_PREFERENCES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(MUSIC_PREFERENCES_PATH, 'w') as f:
+        yaml.dump(prefs, f, default_flow_style=False, sort_keys=False)
+
+
+def add_preference_feedback(pattern_name: str, feedback_type: str, reason: str) -> None:
+    """Add feedback for a pattern (like/dislike)."""
+    prefs = load_music_preferences()
+    entry = {
+        "pattern": pattern_name,
+        "reason": reason,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    key = "likes" if feedback_type == "like" else "dislikes"
+    prefs[key].append(entry)
+
+    # Also remove from opposite list if present (changed mind)
+    opposite = "dislikes" if feedback_type == "like" else "likes"
+    prefs[opposite] = [e for e in prefs[opposite] if e["pattern"] != pattern_name]
+
+    save_music_preferences(prefs)
+
+
 def get_current_eeg_state(window_seconds: int = 10) -> dict:
     """Get current EEG state from database."""
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
+        # Optimized query: get latest state directly instead of MODE() aggregate
+        # This is faster and gives more immediate feedback
         cur.execute("""
             SELECT
-                MAX(ts_start) as ts_start,
-                AVG(alpha_rel) as alpha_rel,
-                AVG(beta_rel) as beta_rel,
-                AVG(delta_rel) as delta_rel,
-                AVG(theta_rel) as theta_rel,
-                AVG(gamma_rel) as gamma_rel,
-                COUNT(*) as sample_count,
-                MODE() WITHIN GROUP (ORDER BY features->>'state') as dominant_state
+                ts_start,
+                alpha_rel, beta_rel, delta_rel, theta_rel, gamma_rel,
+                features->>'state' as state
             FROM eeg_window
             WHERE ts_start > NOW() - INTERVAL '%s seconds'
+            ORDER BY ts_start DESC
+            LIMIT 20
         """, (window_seconds,))
 
-        row = cur.fetchone()
-        conn.close()
+        rows = cur.fetchall()
 
-        if not row or row['sample_count'] == 0:
+        if not rows:
             return {"status": "no_data", "state": "NO_DATA"}
 
-        ts = row['ts_start']
+        # Use latest row for timestamp and state
+        latest = rows[0]
+        ts = latest['ts_start']
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
         age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+
+        # Average band powers across recent samples
+        n = len(rows)
+        bands = {
+            "alpha": round(sum(float(r['alpha_rel'] or 0) for r in rows) / n, 1),
+            "beta": round(sum(float(r['beta_rel'] or 0) for r in rows) / n, 1),
+            "delta": round(sum(float(r['delta_rel'] or 0) for r in rows) / n, 1),
+            "theta": round(sum(float(r['theta_rel'] or 0) for r in rows) / n, 1),
+            "gamma": round(sum(float(r['gamma_rel'] or 0) for r in rows) / n, 1),
+        }
+
+        # Get most common state from recent samples
+        from collections import Counter
+        states = [r['state'] for r in rows if r['state']]
+        dominant_state = Counter(states).most_common(1)[0][0] if states else "UNKNOWN"
 
         return {
             "status": "ok",
             "timestamp": to_chicago(ts),
             "data_age_seconds": round(age_seconds, 1),
             "is_fresh": age_seconds < 10,
-            "state": row['dominant_state'] or "UNKNOWN",
-            "bands": {
-                "alpha": round(float(row['alpha_rel'] or 0), 1),
-                "beta": round(float(row['beta_rel'] or 0), 1),
-                "delta": round(float(row['delta_rel'] or 0), 1),
-                "theta": round(float(row['theta_rel'] or 0), 1),
-                "gamma": round(float(row['gamma_rel'] or 0), 1),
-            }
+            "state": dominant_state,
+            "bands": bands
         }
     except Exception as e:
         return {"status": "error", "state": "ERROR", "message": str(e)}
+    finally:
+        if conn:
+            release_db_connection(conn)
 
 
 def get_state_history(minutes: int = 5) -> list:
     """Get recent state transitions."""
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -139,10 +251,12 @@ def get_state_history(minutes: int = 5) -> list:
         """, (minutes,))
 
         rows = cur.fetchall()
-        conn.close()
         return list(reversed(rows))
     except Exception:
         return []
+    finally:
+        if conn:
+            release_db_connection(conn)
 
 
 def select_pattern_for_state(state: str, library: dict, recent_patterns: list) -> Optional[dict]:
@@ -472,17 +586,22 @@ class ConductorApp(App):
         Binding("space", "toggle_pause", "Pause"),
         Binding("n", "next_pattern", "Next"),
         Binding("r", "regenerate", "Regen"),
+        Binding("l", "like_pattern", "Like"),
+        Binding("d", "dislike_pattern", "Dislike"),
         Binding("ctrl+enter", "send_immediate", "Send Now", show=False),
     ]
 
-    def __init__(self):
+    def __init__(self, no_eeg_mode: bool = False):
         super().__init__()
+        self.no_eeg_mode = no_eeg_mode
         self.library = load_beats_library()
+        self.preferences = load_music_preferences()
         self.session = load_session()
         self.poll_interval = 3.0  # seconds
         self.change_cooldown = 30  # seconds between pattern changes
         self.last_change_time = 0
         self.pending_message: Optional[str] = None
+        self.awaiting_feedback: Optional[str] = None  # "like" or "dislike"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -499,13 +618,51 @@ class ConductorApp(App):
     def on_mount(self) -> None:
         """Start background tasks on mount."""
         self.log_message("[bold green]Neural Music Conductor started[/]")
-        mode = "[bold cyan]LLM Mode (Claude Code)[/]" if USE_LLM_CONDUCTOR else "[yellow]Rule-based Mode[/]"
-        self.log_message(f"Mode: {mode}")
+
+        if self.no_eeg_mode:
+            self.log_message("[bold magenta]TRAINING MODE[/] - No EEG required")
+            self.log_message("[dim]Press [L] to like, [D] to dislike current pattern[/]")
+            self.log_message("[dim]Press [N] to play next pattern[/]")
+            # Show training mode in brain widget
+            brain_widget = self.query_one(BrainStateWidget)
+            brain_widget.state = "TRAINING"
+            brain_widget.fresh = True
+        else:
+            mode = "[bold cyan]LLM Mode (Claude Code)[/]" if USE_LLM_CONDUCTOR else "[yellow]Rule-based Mode[/]"
+            self.log_message(f"Mode: {mode}")
+            if USE_LLM_CONDUCTOR:
+                self.log_message(f"[dim]Reasoning log: {REASONING_LOG}[/]")
+
         self.log_message(f"Loaded {len(self.library.get('library', {}))} patterns")
-        if USE_LLM_CONDUCTOR:
-            self.log_message(f"[dim]Reasoning log: {REASONING_LOG}[/]")
-        self.set_interval(self.poll_interval, self.poll_eeg)
+
+        # Show preferences summary
+        likes = len(self.preferences.get("likes", []))
+        dislikes = len(self.preferences.get("dislikes", []))
+        if likes or dislikes:
+            self.log_message(f"[dim]Preferences: {likes} likes, {dislikes} dislikes[/]")
+
+        # Check Chrome CDP connection
+        self.check_chrome_connection()
+
+        # Only poll EEG if not in training mode
+        if not self.no_eeg_mode:
+            self.set_interval(self.poll_interval, self.poll_eeg)
         self.set_interval(1.0, self.update_playing_time)
+
+    @work(exclusive=True, thread=True)
+    def check_chrome_connection(self) -> None:
+        """Check Chrome CDP connection in background."""
+        ok, msg = check_chrome_cdp()
+        if ok:
+            self.call_from_thread(self.log_message, f"[green]Chrome: {msg}[/]")
+        else:
+            self.call_from_thread(self.log_message, f"[yellow]Chrome: {msg}[/]")
+            self.call_from_thread(self.log_message, "[yellow]Waiting for Chrome CDP...[/]")
+            if wait_for_chrome_cdp(max_retries=3, retry_delay=2.0):
+                self.call_from_thread(self.log_message, "[green]Chrome CDP connected![/]")
+            else:
+                self.call_from_thread(self.log_message, "[red]Chrome CDP unavailable - pattern playback will fail[/]")
+                self.call_from_thread(self.log_message, "[dim]Start Chrome with: chrome --remote-debugging-port=9223[/]")
 
     def log_message(self, msg: str) -> None:
         """Add message to log."""
@@ -785,6 +942,8 @@ def main():
     parser = argparse.ArgumentParser(description="Neural Music Conductor TUI")
     parser.add_argument("--fresh", action="store_true",
                         help="Start fresh (clear session state)")
+    parser.add_argument("--no-eeg", action="store_true",
+                        help="Training mode: run without EEG, give feedback on patterns")
     args = parser.parse_args()
 
     if args.fresh and SESSION_FILE.exists():
@@ -794,7 +953,7 @@ def main():
     atexit.register(reset_terminal)
 
     try:
-        app = ConductorApp()
+        app = ConductorApp(no_eeg_mode=args.no_eeg)
         app.run()
     finally:
         reset_terminal()

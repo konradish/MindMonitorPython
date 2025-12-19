@@ -323,13 +323,40 @@ def log_reasoning(reasoning: str, pattern_name: str, action: str) -> None:
 
 
 def call_llm_conductor(eeg_state: dict, current_pattern: str, pattern_duration_min: float,
-                       library: dict, user_message: str = None) -> Optional[dict]:
+                       library: dict, user_message: str = None,
+                       preferences: dict = None) -> Optional[dict]:
     """Call Claude Code CLI to make conductor decision."""
     # Build context for Claude
     patterns_summary = []
     for name, data in library.get("library", {}).items():
         moods = ", ".join(data.get("moods", []))
         patterns_summary.append(f"- {name}: {moods}")
+
+    # Build preferences summary
+    prefs_section = ""
+    if preferences:
+        likes = preferences.get("likes", [])
+        dislikes = preferences.get("dislikes", [])
+        notes = preferences.get("notes", [])
+
+        if likes or dislikes or notes:
+            prefs_lines = ["## User Music Preferences (IMPORTANT - use this to guide selection)"]
+            if likes:
+                prefs_lines.append("\n### Liked Patterns:")
+                for entry in likes[-10:]:  # Last 10 likes
+                    prefs_lines.append(f"- {entry['pattern']}: {entry.get('reason', 'no reason')}")
+            if dislikes:
+                prefs_lines.append("\n### Disliked Patterns (AVOID THESE):")
+                for entry in dislikes[-10:]:  # Last 10 dislikes
+                    prefs_lines.append(f"- {entry['pattern']}: {entry.get('reason', 'no reason')}")
+            if notes:
+                prefs_lines.append("\n### General Preferences:")
+                for note in notes[-5:]:
+                    prefs_lines.append(f"- {note}")
+            prefs_section = "\n".join(prefs_lines) + "\n\n"
+
+    # Check if in training mode (no EEG)
+    is_training = eeg_state.get('state') == 'TRAINING'
 
     context = f"""## Current State
 - EEG State: {eeg_state.get('state', 'UNKNOWN')}
@@ -344,15 +371,15 @@ def call_llm_conductor(eeg_state: dict, current_pattern: str, pattern_duration_m
 - Name: {current_pattern or 'None'}
 - Playing for: {pattern_duration_min:.1f} minutes
 
-## Available Patterns
+{prefs_section}## Available Patterns
 {chr(10).join(patterns_summary)}
 
 ## User Message
 {user_message or 'None'}
 
 ## Your Task
-Decide whether to change the pattern or keep it. Write your decision to {DECISION_FILE}.
-Remember: stability is good, don't change too often unless the state clearly calls for it.
+{"TRAINING MODE: Focus on user preferences, not EEG. " if is_training else ""}Decide whether to change the pattern or keep it. Write your decision to {DECISION_FILE}.
+{"Select patterns the user has liked or that match their stated preferences. Avoid disliked patterns!" if is_training else "Remember: stability is good, don't change too often unless the state clearly calls for it."}
 """
 
     # Read system prompt
@@ -400,6 +427,7 @@ Remember: stability is good, don't change too often unless the state clearly cal
 
             return decision
         else:
+            log_reasoning("Decision file not found after Claude call", "N/A", "error")
             return None
     except Exception as e:
         log_reasoning(f"LLM call failed: {e}", "N/A", "error")
@@ -471,13 +499,29 @@ class BrainStateWidget(Static):
             "K_MUSICAL_CHILLS": "^",
             "NO_DATA": ".",
             "ERROR": "X",
+            "TRAINING": "T",
         }.get(self.state, "o")
 
-        fresh_indicator = "[green]LIVE[/]" if self.fresh else "[red]STALE[/]"
+        # Training mode gets special indicator
+        if self.state == "TRAINING":
+            fresh_indicator = "[magenta]TRAINING[/]"
+        else:
+            fresh_indicator = "[green]LIVE[/]" if self.fresh else "[red]STALE[/]"
 
         def bar(val: float, width: int = 20) -> str:
             filled = int(val / 100 * width)
             return "[cyan]" + "#" * filled + "[/][dim]" + "-" * (width - filled) + "[/]"
+
+        # In training mode, show different content
+        if self.state == "TRAINING":
+            return f"""[bold]Training Mode[/] {fresh_indicator}
+[bold magenta]NO EEG REQUIRED[/] {state_emoji}
+{"=" * 36}
+[dim]Give feedback on patterns to train
+your preferences. The system will
+learn what music you like![/]
+
+[L] Like  [D] Dislike  [N] Next"""
 
         return f"""[bold]Brain State[/] {fresh_indicator}
 [bold yellow]{self.state}[/] {state_emoji}  [{self.timestamp}]
@@ -647,6 +691,9 @@ class ConductorApp(App):
         # Only poll EEG if not in training mode
         if not self.no_eeg_mode:
             self.set_interval(self.poll_interval, self.poll_eeg)
+        else:
+            # In training mode, poll for user messages/requests
+            self.set_interval(self.poll_interval, self.poll_training_messages)
         self.set_interval(1.0, self.update_playing_time)
 
     @work(exclusive=True, thread=True)
@@ -710,6 +757,24 @@ class ConductorApp(App):
 
         # Check if we should change pattern
         await self.maybe_change_pattern(eeg)
+
+    @work(exclusive=True)
+    async def poll_training_messages(self) -> None:
+        """In training mode, check for pending user messages and handle them."""
+        if not self.pending_message:
+            return
+
+        # Build a fake "training" EEG state
+        training_eeg = {
+            "status": "ok",
+            "state": "TRAINING",
+            "is_fresh": True,
+            "bands": {"alpha": 0, "beta": 0, "delta": 0, "theta": 0, "gamma": 0}
+        }
+
+        # Process the message through LLM conductor
+        await self.llm_decide_pattern(training_eeg, self.pending_message)
+        self.pending_message = None
 
     async def maybe_change_pattern(self, eeg: dict) -> None:
         """Decide whether to change the pattern based on EEG state."""
@@ -782,15 +847,18 @@ class ConductorApp(App):
                 current_pattern,
                 pattern_duration_min,
                 self.library,
-                user_message
+                user_message,
+                self.preferences  # Pass user preferences to guide selection
             )
             try:
                 decision = future.result(timeout=90)
             except Exception as e:
+                log_reasoning(f"LLM future failed: {e}", "N/A", "error")
                 self.log_message(f"[red]LLM call failed: {e}[/]")
                 return
 
         if not decision:
+            # Already logged in call_llm_conductor
             self.log_message(f"[yellow]No decision from LLM[/]")
             return
 
@@ -907,10 +975,76 @@ class ConductorApp(App):
         self.pending_message = "different pattern"
         self.last_change_time = 0
 
+    def action_like_pattern(self) -> None:
+        """Mark current pattern as liked."""
+        pattern = self.session.get("current_pattern")
+        if not pattern:
+            self.log_message("[yellow]No pattern playing to rate[/]")
+            return
+        self.awaiting_feedback = "like"
+        input_widget = self.query_one(Input)
+        input_widget.placeholder = f"Why do you like '{pattern}'? (Enter to save, Esc to cancel)"
+        input_widget.focus()
+        self.log_message(f"[green]👍 Rating '{pattern}' - enter your reason below[/]")
+
+    def action_dislike_pattern(self) -> None:
+        """Mark current pattern as disliked."""
+        pattern = self.session.get("current_pattern")
+        if not pattern:
+            self.log_message("[yellow]No pattern playing to rate[/]")
+            return
+        self.awaiting_feedback = "dislike"
+        input_widget = self.query_one(Input)
+        input_widget.placeholder = f"Why don't you like '{pattern}'? (Enter to save, Esc to cancel)"
+        input_widget.focus()
+        self.log_message(f"[red]👎 Rating '{pattern}' - enter your reason below[/]")
+
+    def on_key(self, event) -> None:
+        """Handle key events for canceling feedback."""
+        if self.awaiting_feedback and event.key == "escape":
+            self.awaiting_feedback = None
+            input_widget = self.query_one(Input)
+            input_widget.placeholder = "Message to conductor (Enter=queue, Ctrl+Enter=immediate)"
+            input_widget.value = ""
+            self.log_message("[dim]Feedback cancelled[/]")
+            event.prevent_default()
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle Enter key on input - queue message for next cycle."""
-        if event.value.strip():
-            self.pending_message = event.value.strip()
+        """Handle Enter key on input - queue message or save feedback."""
+        value = event.value.strip()
+
+        # Check if we're awaiting feedback
+        if self.awaiting_feedback:
+            pattern = self.session.get("current_pattern")
+            feedback_type = self.awaiting_feedback
+            self.awaiting_feedback = None
+
+            # Reset input placeholder
+            input_widget = self.query_one(Input)
+            input_widget.placeholder = "Message to conductor (Enter=queue, Ctrl+Enter=immediate)"
+            event.input.value = ""
+
+            if pattern:
+                # Save the feedback
+                add_preference_feedback(pattern, feedback_type, value or "No reason given")
+                self.preferences = load_music_preferences()  # Reload
+
+                emoji = "👍" if feedback_type == "like" else "👎"
+                color = "green" if feedback_type == "like" else "red"
+                self.log_message(f"[{color}]{emoji} Saved: {feedback_type} '{pattern}'[/]")
+                if value:
+                    self.log_message(f"[dim]Reason: {value}[/]")
+
+                # In training mode, auto-advance to next pattern after dislike
+                if self.no_eeg_mode and feedback_type == "dislike":
+                    self.log_message("[dim]Auto-advancing to next pattern...[/]")
+                    self.pending_message = "play something different"
+                    self.last_change_time = 0
+            return
+
+        # Normal message handling
+        if value:
+            self.pending_message = value
             self.log_message(f"[magenta]Queued: {event.value}[/]")
             event.input.value = ""
 

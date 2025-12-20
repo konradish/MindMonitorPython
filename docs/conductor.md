@@ -55,14 +55,34 @@ powershell.exe -Command "cd C:\projects\prompt-kit\chrome-automation; \$env:CDP_
 
 States defined in TimescaleDB `state_definition` table:
 
-| State | Signature | Interpretation |
-|-------|-----------|----------------|
-| **K_FLOW** | Alpha 30-45%, Beta 15-28%, Gamma <18% | Absorbed flow - engaged without strain. Sustainable focus. |
-| **K_PLAYING** | Theta >15%, Beta <18%, Gamma <12% | Creative/musical absorption. Not thinking, being. |
-| **K_DOWNSHIFT** | Alpha 26-50%, balanced | Conscious settling. Regulated return to calm. |
-| **K_HIGH_LOAD** | Alpha 15-28%, Beta 20-34%, Gamma 18-38%, Delta >10% | High cognitive/sensory load. Could be frustrated or overwhelmed. |
-| **K_THINKING** | Alpha <28%, Beta >18%, Gamma >15% | Active cognitive effort. Problem solving, calculation. |
-| **K_MUSICAL_CHILLS** | Alpha 28-36%, Beta 18-26%, Gamma 15-22%, Theta 10-16% | Musical frisson - chills/emotional response to music. |
+| State | Signature | Interpretation | Light Color |
+|-------|-----------|----------------|-------------|
+| **K_FLOW** | Alpha 30-45%, Beta 15-28%, Gamma <18% | Absorbed flow - engaged without strain. | Calm blue |
+| **K_PLAYING** | Theta >15%, Beta <18%, Gamma <12% | Creative/musical absorption. Not thinking, being. | Purple |
+| **K_DOWNSHIFT** | Alpha 26-50%, balanced | Conscious settling. Regulated return to calm. | Warm amber |
+| **K_HIGH_LOAD** | Alpha 15-28%, Beta 20-34%, Gamma 18-38%, Delta >10% | High cognitive/sensory load. Could be overwhelmed. | Soft red (dimmed) |
+| **K_THINKING** | Alpha <28%, Beta >18%, Gamma >15% | Active cognitive effort. Problem solving. | Neutral warm |
+| **K_MUSICAL_CHILLS** | Alpha 28-36%, Beta 18-26%, Gamma 15-22%, Theta 10-16% | Musical frisson - chills/emotional response. | Vivid purple |
+
+## Ambient Light Integration
+
+The conductor controls an office RGB light (Hubitat device 37) that changes color based on brain state. Light changes happen automatically when patterns are played.
+
+**Light mappings** (hue 0-100, saturation 0-100, level 0-100):
+```
+K_FLOW:           h:66 s:70 l:60 (calm blue)
+K_PLAYING:        h:78 s:80 l:70 (purple)
+K_DOWNSHIFT:      h:10 s:80 l:50 (warm amber)
+K_HIGH_LOAD:      h:0  s:60 l:40 (soft red, dimmed)
+K_THINKING:       h:50 s:50 l:70 (neutral warm)
+K_MUSICAL_CHILLS: h:78 s:90 l:80 (vivid purple)
+```
+
+**Prerequisites:** Hubitat credentials in `~/.config/smart-home/.env`:
+```bash
+HUBITAT_APP_ID=your_app_id
+HUBITAT_TOKEN=your_access_token
+```
 
 ## Decision Framework
 

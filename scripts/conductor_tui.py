@@ -16,6 +16,8 @@ import random
 import subprocess
 import sys
 import time
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -83,6 +85,117 @@ def release_db_connection(conn):
 # Chrome CDP settings
 CDP_PORT = os.environ.get('CDP_PORT', '9223')
 CDP_HOST = os.environ.get('CDP_HOST', 'localhost')
+
+# ============================================================================
+# Hubitat Light Control
+# ============================================================================
+
+# Load Hubitat credentials from env file
+HUBITAT_ENV_FILE = Path.home() / ".config" / "smart-home" / ".env"
+HUBITAT_IP = "192.168.1.125"
+HUBITAT_DEVICE_ID = "37"  # Office RGB light
+
+# Light color mappings for brain states (hue 0-100, saturation 0-100, level 0-100)
+STATE_LIGHT_MAP = {
+    "K_FLOW": {"hue": 66, "sat": 70, "level": 60, "desc": "calm blue"},
+    "K_PLAYING": {"hue": 78, "sat": 80, "level": 70, "desc": "purple"},
+    "K_DOWNSHIFT": {"hue": 10, "sat": 80, "level": 50, "desc": "warm amber"},
+    "K_HIGH_LOAD": {"hue": 0, "sat": 60, "level": 40, "desc": "soft red"},
+    "K_THINKING": {"hue": 50, "sat": 50, "level": 70, "desc": "neutral warm"},
+    "K_MUSICAL_CHILLS": {"hue": 78, "sat": 90, "level": 80, "desc": "vivid purple"},
+    "K_CONTAINED_DISTRESS": {"hue": 0, "sat": 100, "level": 30, "desc": "red"},
+}
+
+# Default light settings when no state mapping
+DEFAULT_LIGHT = {"hue": 40, "sat": 30, "level": 50, "desc": "warm white"}
+
+
+def load_hubitat_credentials() -> tuple[Optional[str], Optional[str]]:
+    """Load Hubitat API credentials from env file."""
+    if not HUBITAT_ENV_FILE.exists():
+        return None, None
+
+    app_id = None
+    token = None
+
+    with open(HUBITAT_ENV_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("HUBITAT_APP_ID="):
+                app_id = line.split("=", 1)[1].strip('"\'')
+            elif line.startswith("HUBITAT_TOKEN="):
+                token = line.split("=", 1)[1].strip('"\'')
+
+    return app_id, token
+
+
+def set_light(hue: int = None, sat: int = None, level: int = None,
+              color_temp: int = None, on: bool = None) -> tuple[bool, str]:
+    """Control the office RGB light via Hubitat API.
+
+    Args:
+        hue: Hue value 0-100
+        sat: Saturation value 0-100
+        level: Brightness level 0-100
+        color_temp: Color temperature in Kelvin (overrides hue/sat for white)
+        on: True to turn on, False to turn off
+
+    Returns:
+        (success, message) tuple
+    """
+    app_id, token = load_hubitat_credentials()
+    if not app_id or not token:
+        return False, "Hubitat credentials not found"
+
+    base_url = f"http://{HUBITAT_IP}/apps/api/{app_id}/devices/{HUBITAT_DEVICE_ID}"
+    commands = []
+
+    if on is not None:
+        commands.append(("on" if on else "off", None))
+
+    if color_temp is not None:
+        commands.append((f"setColorTemperature/{color_temp}", None))
+    else:
+        if hue is not None:
+            commands.append((f"setHue/{hue}", None))
+        if sat is not None:
+            commands.append((f"setSaturation/{sat}", None))
+
+    if level is not None:
+        commands.append((f"setLevel/{level}", None))
+
+    if not commands:
+        return True, "No commands to execute"
+
+    for cmd, _ in commands:
+        url = f"{base_url}/{cmd}?access_token={token}"
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                pass  # Just need success status
+        except urllib.error.URLError as e:
+            return False, f"Light API error: {e}"
+        except Exception as e:
+            return False, f"Light error: {e}"
+
+    return True, "Light updated"
+
+
+def set_light_for_state(state: str) -> tuple[bool, str]:
+    """Set light color/brightness based on brain state.
+
+    Returns:
+        (success, message) tuple with description of light setting
+    """
+    settings = STATE_LIGHT_MAP.get(state, DEFAULT_LIGHT)
+    success, msg = set_light(
+        hue=settings["hue"],
+        sat=settings["sat"],
+        level=settings["level"]
+    )
+    if success:
+        return True, f"Light: {settings['desc']} (h:{settings['hue']} s:{settings['sat']} l:{settings['level']})"
+    return False, msg
 
 
 def check_chrome_cdp(timeout: float = 2.0) -> tuple[bool, str]:
@@ -908,6 +1021,14 @@ class ConductorApp(App):
             lib_pattern = self.library.get("library", {}).get(pattern_name, {})
             pw.moods = ", ".join(lib_pattern.get("moods", []))
 
+            # Update light for brain state
+            current_state = eeg.get("state", "UNKNOWN")
+            light_ok, light_msg = set_light_for_state(current_state)
+            if light_ok:
+                self.log_message(f"[yellow]{light_msg}[/]")
+            else:
+                self.log_message(f"[dim]Light: {light_msg}[/]")
+
             save_session(self.session)
         else:
             self.log_message("[red]Failed to play pattern[/]")
@@ -942,6 +1063,13 @@ class ConductorApp(App):
             pw = self.query_one(PatternWidget)
             pw.pattern_name = pattern['name']
             pw.moods = ", ".join(pattern.get('moods', []))
+
+            # Update light for brain state
+            light_ok, light_msg = set_light_for_state(state)
+            if light_ok:
+                self.log_message(f"[yellow]{light_msg}[/]")
+            else:
+                self.log_message(f"[dim]Light: {light_msg}[/]")
 
             save_session(self.session)
         else:

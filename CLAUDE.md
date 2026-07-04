@@ -117,6 +117,12 @@ uv run python -m consciousness_monitor --analyze --file OSC-Python-Recording.csv
 
 ## Key Technical Details
 
+### Cross-Platform Patterns (WSL)
+This project uses extensive WSL workarounds. See `~/.claude/skills/wsl-cross-platform/SKILL.md` for:
+- Socket-based port checks (never PowerShell curl - can hang indefinitely)
+- File-based string transfer (avoid escaping nightmares)
+- Windows audio via Chrome CDP (WSL audio sounds awful)
+
 ### EEG Signal Processing
 - Sample rate: 256 Hz (Muse standard)
 - Mind Monitor outputs microvolts directly
